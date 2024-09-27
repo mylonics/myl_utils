@@ -1,0 +1,14 @@
+# Copyright (c) 2024 mylonics.
+# SPDX-License-Identifier: Apache-2.0
+
+config MYL_UTILS
+	bool "Enable Mylonics Utilities"
+	help
+	  This option enables the use of the mylonics utilities library.
+
+config MYL_UTILS_USB_SERIAL
+	bool "Enable Mylonics USB Serial Implementation"
+  default n
+	depends on MYL_UTILS
+	help
+	  This option enables the use of the USB serial implementation.

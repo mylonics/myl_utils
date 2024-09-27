@@ -12,3 +12,57 @@ config MYL_UTILS_USB_SERIAL
 	depends on MYL_UTILS
 	help
 	  This option enables the use of the USB serial implementation.
+
+
+menu "Myl Utils USB options"
+	depends on MYL_UTILS_USB_SERIAL
+
+config MYL_UTILS_USBD_MANUFACTURER
+	string "USB device sample manufacturer string"
+	default "Mylonics"
+	depends on MYL_UTILS_USB_SERIAL
+	help
+	  USB device sample manufacturer string.
+
+config MYL_UTILS_USBD_PRODUCT
+	string "USB device sample product string"
+	default "USB Debugger"
+	depends on MYL_UTILS_USB_SERIAL
+	help
+	  USB device sample product stringa.
+
+config MYL_UTILS_USBD_PID
+	hex "USB device sample Product ID"
+	default 0x0001
+	depends on MYL_UTILS_USB_SERIAL
+	help
+	  USB device sample Product ID.
+
+config MYL_UTILS_USBD_SELF_POWERED
+	bool "USB device sample Self-powered attribute"
+	default y
+	depends on MYL_UTILS_USB_SERIAL
+	help
+	  Set the Self-powered attribute in the sample configuration.
+
+config MYL_UTILS_USBD_REMOTE_WAKEUP
+	bool "USB device sample Remote Wakeup attribute"
+	depends on MYL_UTILS_USB_SERIAL
+	help
+	  Set the Remote Wakeup attribute in the sample configuration.
+
+config MYL_UTILS_USBD_MAX_POWER
+	int "USB device sample bMaxPower value"
+	depends on MYL_UTILS_USB_SERIAL
+	default 125
+	range 0 250
+	help
+	  bMaxPower value in the sample configuration in 2 mA units.
+
+config MYL_UTILS_USBD_20_EXTENSION_DESC
+	bool "Use default USB 2.0 Extension Descriptor"
+	depends on MYL_UTILS_USB_SERIAL
+	help
+	  Set bcdUSB value to 0201 and use default USB 2.0 Extension Descriptor.
+
+endmenu

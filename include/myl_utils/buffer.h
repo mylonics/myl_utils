@@ -1,7 +1,7 @@
 #pragma once
 
 #include "cmsis_gcc.h"
-#include "utils/noncopyable.h"
+#include "myl_utils/noncopyable.h"
 
 template <class T, size_t size>
 class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {

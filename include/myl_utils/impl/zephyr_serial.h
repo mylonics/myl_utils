@@ -12,9 +12,8 @@
  *
  */
 
-// #include <etl/vector.h>
-#include <utils/impl/usbd_init.h>
-#include <utils/serial.h>
+#include <myl_utils/impl/usbd_init.h>
+#include <myl_utils/serial.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/ring_buffer.h>
 
@@ -180,6 +179,7 @@ class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
   };
 };
 
+#ifdef CONFIG_MYL_UTILS_USB_SERIAL
 class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
  public:
   explicit ZephyrUsbSerialDevice(const struct device *dev)
@@ -269,3 +269,4 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
   inline static struct usbd_context *sample_usbd;
   inline static struct k_sem dtr_sem;
 };
+#endif

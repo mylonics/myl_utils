@@ -79,6 +79,7 @@ class ZephyrBasicSerialDevice : public SerialPort {
     ZephyrBasicSerialDevice *ctx = (ZephyrBasicSerialDevice *)user_data;
 
     while (uart_irq_update(dev) && uart_irq_is_pending(dev)) {
+      LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
       if (uart_irq_rx_ready(dev)) {
         int recv_len, rb_len;
         uint8_t buffer[64];
@@ -92,13 +93,13 @@ class ZephyrBasicSerialDevice : public SerialPort {
 
         recv_len = uart_fifo_read(dev, buffer, len);
         if (recv_len < 0) {
-          // LOG_ERR("Failed to read UART FIFO");
+          LOG_ERR("Failed to read UART FIFO");
           recv_len = 0;
         };
 
         rb_len = ring_buf_put(&ctx->rx_rb_, buffer, recv_len);
         if (rb_len < recv_len) {
-          // LOG_ERR("Drop %u bytes", recv_len - rb_len);
+          LOG_ERR("Drop %u bytes", recv_len - rb_len);
         }
       }
 
@@ -108,7 +109,7 @@ class ZephyrBasicSerialDevice : public SerialPort {
 
         rb_len = ring_buf_get(&ctx->tx_rb_, buffer, sizeof(buffer));
         if (!rb_len) {
-          // LOG_DBG("Ring buffer empty, disable TX IRQ");
+          LOG_DBG("Ring buffer empty, disable TX IRQ");
           uart_irq_tx_disable(dev);
           ctx->transmitting_ = false;
           continue;
@@ -116,10 +117,10 @@ class ZephyrBasicSerialDevice : public SerialPort {
 
         send_len = uart_fifo_fill(dev, buffer, rb_len);
         if (send_len < rb_len) {
-          // LOG_ERR("Drop %d bytes", rb_len - send_len);
+          LOG_ERR("Drop %d bytes", rb_len - send_len);
         }
 
-        // LOG_DBG("ringbuf -> tty fifo %d bytes", send_len);
+        LOG_DBG("ringbuf -> tty fifo %d bytes", send_len);
       }
     }
   }
@@ -188,8 +189,9 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
         };
 
   bool Start(bool connect_blocking = false) {
+    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
     if (!device_is_ready(dev_)) {
-      // LOG_ERR("CDC ACM device not ready");
+      LOG_ERR("CDC ACM device not ready");
       return false;
     }
     InitializeHW();
@@ -206,13 +208,14 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
 
  private:
   static int InitializeHW() {
+    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
     int ret = 0;
     if (!hw_initialized) {
       connected = false;
       k_sem_init(&dtr_sem, 0, 1);
       sample_usbd = sample_usbd_init_device(usb_hw_msg_cb);
       if (sample_usbd == NULL) {
-        // LOG_ERR("Failed to initialize USB device");
+        LOG_ERR("Failed to initialize USB device");
         ret = -ENODEV;
         return ret;
       }
@@ -220,13 +223,13 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
       if (!usbd_can_detect_vbus(sample_usbd)) {
         int err = usbd_enable(sample_usbd);
         if (err) {
-          // LOG_ERR("Failed to enable device support");
+          LOG_ERR("Failed to enable device support");
           ret = err;
           return ret;
         }
       }
 
-      // LOG_INF("USB device support enabled");
+      LOG_INF("USB device support enabled");
 
       k_msleep(100); /* Wait 100ms for the host to do all settings */
       hw_initialized = true;
@@ -236,18 +239,19 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
 
   static void usb_hw_msg_cb(struct usbd_context *const ctx,
                             const struct usbd_msg *msg) {
-    // LOG_INF("USBD message: %s", usbd_msg_type_string(msg->type));
+    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+    LOG_INF("USBD message: %s", usbd_msg_type_string(msg->type));
 
     if (usbd_can_detect_vbus(ctx)) {
       if (msg->type == USBD_MSG_VBUS_READY) {
         if (usbd_enable(ctx)) {
-          // LOG_ERR("Failed to enable device support");
+          LOG_ERR("Failed to enable device support");
         }
       }
 
       if (msg->type == USBD_MSG_VBUS_REMOVED) {
         if (usbd_disable(ctx)) {
-          // LOG_ERR("Failed to disable device support");
+          LOG_ERR("Failed to disable device support");
         }
       }
     }

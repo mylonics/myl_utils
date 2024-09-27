@@ -35,8 +35,6 @@
 #include <zephyr/usb/bos.h>
 #include <zephyr/usb/usbd.h>
 
-// LOG_MODULE_REGISTER(usbd_sample_config);
-
 #define ZEPHYR_PROJECT_USB_VID 0x2fe3
 
 /*
@@ -69,6 +67,7 @@ static void sample_fix_code_triple(struct usbd_context *uds_ctx,
 }
 
 struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
+  LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
   /* doc device instantiation start */
   /*
    * Instantiate a context named sample_usbd using the default USB device
@@ -112,25 +111,25 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
   /* doc add string descriptor start */
   err = usbd_add_descriptor(&sample_usbd, &sample_lang);
   if (err) {
-    // LOG_ERR("Failed to initialize language descriptor (%d)", err);
+    LOG_ERR("Failed to initialize language descriptor (%d)", err);
     return NULL;
   }
 
   err = usbd_add_descriptor(&sample_usbd, &sample_mfr);
   if (err) {
-    // LOG_ERR("Failed to initialize manufacturer descriptor (%d)", err);
+    LOG_ERR("Failed to initialize manufacturer descriptor (%d)", err);
     return NULL;
   }
 
   err = usbd_add_descriptor(&sample_usbd, &sample_product);
   if (err) {
-    // LOG_ERR("Failed to initialize product descriptor (%d)", err);
+    LOG_ERR("Failed to initialize product descriptor (%d)", err);
     return NULL;
   }
 
   err = usbd_add_descriptor(&sample_usbd, &sample_sn);
   if (err) {
-    // LOG_ERR("Failed to initialize SN descriptor (%d)", err);
+    LOG_ERR("Failed to initialize SN descriptor (%d)", err);
     return NULL;
   }
   /* doc add string descriptor end */
@@ -139,13 +138,13 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
     err =
         usbd_add_configuration(&sample_usbd, USBD_SPEED_HS, &sample_hs_config);
     if (err) {
-      // LOG_ERR("Failed to add High-Speed configuration");
+      LOG_ERR("Failed to add High-Speed configuration");
       return NULL;
     }
 
     err = usbd_register_all_classes(&sample_usbd, USBD_SPEED_HS, 1);
     if (err) {
-      // LOG_ERR("Failed to add register classes");
+      LOG_ERR("Failed to add register classes");
       return NULL;
     }
 
@@ -155,7 +154,7 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
   /* doc configuration register start */
   err = usbd_add_configuration(&sample_usbd, USBD_SPEED_FS, &sample_fs_config);
   if (err) {
-    // LOG_ERR("Failed to add Full-Speed configuration");
+    LOG_ERR("Failed to add Full-Speed configuration");
     return NULL;
   }
   /* doc configuration register end */
@@ -163,7 +162,7 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
   /* doc functions register start */
   err = usbd_register_all_classes(&sample_usbd, USBD_SPEED_FS, 1);
   if (err) {
-    // LOG_ERR("Failed to add register classes");
+    LOG_ERR("Failed to add register classes");
     return NULL;
   }
   /* doc functions register end */
@@ -174,7 +173,7 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
     /* doc device init-and-msg start */
     err = usbd_msg_register_cb(&sample_usbd, msg_cb);
     if (err) {
-      // LOG_ERR("Failed to register message callback");
+      LOG_ERR("Failed to register message callback");
       return NULL;
     }
     /* doc device init-and-msg end */
@@ -186,7 +185,7 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
 
     err = usbd_add_descriptor(&sample_usbd, &sample_usbext);
     if (err) {
-      // LOG_ERR("Failed to add USB 2.0 Extension Descriptor");
+      LOG_ERR("Failed to add USB 2.0 Extension Descriptor");
       return NULL;
     }
   }
@@ -194,7 +193,7 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
   /* doc device init start */
   err = usbd_init(&sample_usbd);
   if (err) {
-    // LOG_ERR("Failed to initialize device support");
+    LOG_ERR("Failed to initialize device support");
     return NULL;
   }
   /* doc device init end */

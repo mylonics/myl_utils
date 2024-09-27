@@ -1,6 +1,6 @@
 if(CONFIG_MYL_UTILS)
   add_subdirectory(.. build)
-  set_property(GLOBAL APPEND PROPERTY ZEPHYR_INTERFACE_LIBS sample)
+  set_property(GLOBAL APPEND PROPERTY ZEPHYR_INTERFACE_LIBS myl_utils)
   zephyr_include_directories(../include)
-  #zephyr_interface_library_named(sample)
+  #zephyr_interface_library_named(myl_utils)
 endif()

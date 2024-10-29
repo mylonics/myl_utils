@@ -69,6 +69,8 @@ class SerialPort {
   virtual bool Readable() = 0;
 
   virtual char GetC() = 0;
+
+  virtual bool GetC(char& c, size_t timeout_ms) = 0;
 };
 
 class SerialRepeater {

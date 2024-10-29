@@ -19,8 +19,8 @@
 
 #define HW_BUFFER_SIZE 1024
 
-#define RX_BUFFER_SIZE 512
-#define TX_BUFFER_SIZE 512
+#define RX_BUFFER_SIZE 2048
+#define TX_BUFFER_SIZE 2048
 
 class ZephyrBasicSerialDevice : public SerialPort {
  public:
@@ -33,6 +33,7 @@ class ZephyrBasicSerialDevice : public SerialPort {
   };
 
   bool Initialize() {
+    k_sem_init(&new_rx_data, 0, 1);
     ring_buf_init(&rx_rb_, sizeof(rx_buffer_), rx_buffer_);
     ring_buf_init(&tx_rb_, sizeof(tx_buffer_), tx_buffer_);
 
@@ -54,12 +55,30 @@ class ZephyrBasicSerialDevice : public SerialPort {
     }
   }
 
+  void PutC(char c, bool flush) {
+    ring_buf_put(&tx_rb_, (uint8_t *)&c, 1);
+    if (flush || !transmitting_ || (ring_buf_space_get(&tx_rb_) == 0)) {
+      transmitting_ = true;
+      uart_irq_tx_enable(dev_);
+    }
+  }
+
   bool Readable() { return ring_buf_size_get(&rx_rb_); };
 
   char GetC() {
     uint8_t byte;
     ring_buf_get(&rx_rb_, &byte, 1);
     return byte;
+  };
+
+  bool GetC(char &c, size_t timeout_ms) {
+    if (Readable() || (k_sem_take(&new_rx_data, K_MSEC(timeout_ms)) == 0)) {
+      uint8_t byte;
+      ring_buf_get(&rx_rb_, &byte, 1);
+      c = byte;
+      return true;
+    }
+    return false;
   };
 
  protected:
@@ -72,6 +91,8 @@ class ZephyrBasicSerialDevice : public SerialPort {
 
   struct ring_buf rx_rb_;
   struct ring_buf tx_rb_;
+
+  struct k_sem new_rx_data;
 
   volatile bool transmitting_{false};
 
@@ -98,6 +119,7 @@ class ZephyrBasicSerialDevice : public SerialPort {
         };
 
         rb_len = ring_buf_put(&ctx->rx_rb_, buffer, recv_len);
+        k_sem_give(&ctx->new_rx_data);
         if (rb_len < recv_len) {
           LOG_ERR("Drop %u bytes", recv_len - rb_len);
         }
@@ -184,7 +206,8 @@ class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
 class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
  public:
   explicit ZephyrUsbSerialDevice(const struct device *dev)
-      : ZephyrBasicSerialDevice(dev, false), dev_(dev) {
+      : ZephyrBasicSerialDevice(dev, false),
+        dev_(dev){
 
         };
 

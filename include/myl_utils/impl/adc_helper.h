@@ -21,14 +21,14 @@ public:
   };
 };
 
-#define ADC_DT_SPEC(adc_channel) \
+#define DECLARE_ADC_CHANNEL(adc_channel) \
   static const struct adc_dt_spec adc_channel = ADC_DT_SPEC_GET_BY_NAME(DT_PATH(zephyr_user), adc_channel)
 
 #define PREPEND_UINT16(name) \
   uint16_t name
 
 #define ADC_SEQUENCE_DEFINE(sequence_name, ...)                          \
-  FOR_EACH(ADC_DT_SPEC, (;), __VA_ARGS__);                               \
+  FOR_EACH(DECLARE_ADC_CHANNEL, (;), __VA_ARGS__);                       \
   static const struct adc_dt_spec sequence_name[] = {__VA_ARGS__};       \
   static const size_t sequence_name##_count = ARRAY_SIZE(sequence_name); \
   struct sequence_name##_data                                            \
@@ -37,8 +37,30 @@ public:
   };                                                                     \
   typedef AdcValues<sequence_name##_data, sequence_name##_count> sequence_name##Values;
 
-#define ADC_SINGLE_CHANNEL(adc_channel) \
-  ADC_DT_SPEC(adc_channel);
+#define INIT_ADC_SINGLE_CHANNEL(adc_channel)                                 \
+  LOG_MODULE_DECLARE(user, LOG_LEVEL_INF);                                   \
+  if (!adc_is_ready_dt(adc_channel))                                         \
+  {                                                                          \
+    LOG_ERR("ADC controller device %s not ready\n", adc_channel->dev->name); \
+    return 1;                                                                \
+  }                                                                          \
+  int err = adc_channel_setup_dt(adc_channel);                               \
+  if (err < 0)                                                               \
+  {                                                                          \
+    LOG_ERR("Could not setup channel #%d \n", err, adc_channel->channel_id); \
+    return 1;                                                                \
+  }
+
+#define ADC_CHANNEL_READ(adc_channel)                    \
+  bool adc_channel##_read(uint16_t data)                 \
+  {                                                      \
+    struct adc_sequence sequence = {                     \
+        .buffer = data,                                  \
+        .buffer_size = 2,                                \
+    };                                                   \
+    (void)adc_sequence_init_dt(adc_channel_, &sequence); \
+    return = adc_read_dt(adc_channel_, &sequence);       \
+  }
 
 #if !defined(BUFFER_MEM_REGION)
 #define BUFFER_MEM_REGION EMPTY
@@ -150,40 +172,4 @@ public:
     }
     return data;
   }
-};
-
-class AdcSingleChannelHandler : NonCopyable<AdcSingleChannelHandler>
-{
-public:
-  AdcSingleChannelHandler(const struct adc_dt_spec *adc_channel) : adc_channel_{adc_channel}
-  {
-    LOG_MODULE_DECLARE(user, LOG_LEVEL_INF);
-    if (!adc_is_ready_dt(adc_channel_))
-    {
-      LOG_ERR("ADC controller device %s not ready\n", adc_channel_->dev->name);
-    }
-
-    int err = adc_channel_setup_dt(adc_channel_);
-    if (err < 0)
-    {
-      LOG_ERR("Could not setup channel #%d \n", err, adc_channel_->channel_id);
-    }
-  }
-
-  bool Read(uint16_t &data)
-  {
-    (void)adc_sequence_init_dt(adc_channel_, &sequence);
-    int err = adc_read_dt(adc_channel_, &sequence);
-    data = buf;
-    return err;
-  }
-
-private:
-  uint16_t buf;
-  const struct adc_dt_spec *adc_channel_;
-  struct adc_sequence sequence = {
-      .buffer = &buf,
-      /* buffer size in bytes, not number of samples */
-      .buffer_size = sizeof(buf),
-  };
 };

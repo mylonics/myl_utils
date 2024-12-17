@@ -37,29 +37,28 @@ public:
   };                                                                     \
   typedef AdcValues<sequence_name##_data, sequence_name##_count> sequence_name##Values;
 
-#define INIT_ADC_SINGLE_CHANNEL(adc_channel)                                 \
-  LOG_MODULE_DECLARE(user, LOG_LEVEL_INF);                                   \
-  if (!adc_is_ready_dt(adc_channel))                                         \
-  {                                                                          \
-    LOG_ERR("ADC controller device %s not ready\n", adc_channel->dev->name); \
-    return 1;                                                                \
-  }                                                                          \
-  int err = adc_channel_setup_dt(adc_channel);                               \
-  if (err < 0)                                                               \
-  {                                                                          \
-    LOG_ERR("Could not setup channel #%d \n", err, adc_channel->channel_id); \
-    return 1;                                                                \
+#define INIT_ADC_SINGLE_CHANNEL(adc_channel)                \
+  if (!adc_is_ready_dt(&adc_channel))                       \
+  {                                                         \
+    return 1;                                               \
+  }                                                         \
+  int adc_channel_err = adc_channel_setup_dt(&adc_channel); \
+  if (adc_channel_err < 0)                                  \
+  {                                                         \
+    return 1;                                               \
   }
 
 #define ADC_CHANNEL_READ(adc_channel)                    \
-  bool adc_channel##_read(uint16_t data)                 \
+  int adc_channel##_read(uint16_t &data, float conv = 1) \
   {                                                      \
     struct adc_sequence sequence = {                     \
-        .buffer = data,                                  \
-        .buffer_size = 2,                                \
+        .buffer = &data,                                 \
+        .buffer_size = sizeof(data),                     \
     };                                                   \
-    (void)adc_sequence_init_dt(adc_channel_, &sequence); \
-    return = adc_read_dt(adc_channel_, &sequence);       \
+    (void)adc_sequence_init_dt(&adc_channel, &sequence); \
+    int err = adc_read_dt(&adc_channel, &sequence);      \
+    data = (uint16_t)((float)data * conv);               \
+    return err;                                          \
   }
 
 #if !defined(BUFFER_MEM_REGION)
@@ -152,7 +151,7 @@ public:
     }
   }
 
-  T AdcRead()
+  T Read()
   {
     T data{};
     int ret = k_poll(&event, 1, K_NO_WAIT);

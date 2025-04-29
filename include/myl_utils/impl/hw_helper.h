@@ -3,6 +3,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 
+#define INITIALIZE_USER_LOG() LOG_MODULE_REGISTER(user, LOG_LEVEL_DBG);
+
 #define DECLARE_PWM(pwm) \
   static const struct pwm_dt_spec pwm = PWM_DT_SPEC_GET(DT_NODELABEL(pwm));
 

@@ -6,6 +6,16 @@ config MYL_UTILS
 	help
 	  This option enables the use of the mylonics utilities library.
 
+config MYL_UTILS_LOG
+	bool "Enable Mylonics Default Log Configuration"
+  default y
+	select CONFIG_LOG
+	select CONFIG_LOG_BACKEND_RTT
+	select CONFIG_LOG_MODE_IMMEDIATE
+	select CONFIG_CBPRINTF_FP_SUPPORT
+	help
+	  This option enables myl_utils recommended log configuration
+
 config MYL_UTILS_USB_SERIAL
 	bool "Enable Mylonics USB Serial Implementation"
   default n

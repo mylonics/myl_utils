@@ -6,6 +6,19 @@ config MYL_UTILS
 	help
 	  This option enables the use of the mylonics utilities library.
 
+config MYL_UTILS_CPP
+	bool "Enable Mylonics CPP Defaults"
+	default n
+	select CPP
+	select REQUIRES_FULL_LIBCPP
+	help
+	  This option enables the default mylonics cpp settings.
+
+choice STD_CPP
+	depends on MYL_UTILS_CPP
+	default STD_CPP17
+endchoice
+
 config MYL_UTILS_SPI
 	bool "Enable Mylonics SPI Utilities"
 	default n

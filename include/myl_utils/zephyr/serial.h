@@ -12,8 +12,8 @@
  *
  */
 
-#include <myl_utils/impl/usbd_init.h>
 #include <myl_utils/serial.h>
+#include <myl_utils/zephyr/usbd_init.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/ring_buffer.h>
 

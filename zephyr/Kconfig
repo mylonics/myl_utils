@@ -6,6 +6,22 @@ config MYL_UTILS
 	help
 	  This option enables the use of the mylonics utilities library.
 
+config MYL_UTILS_SPI
+	bool "Enable Mylonics SPI Utilities"
+	default y
+	depends on MYL_UTILS
+	select SPI
+	help
+	  This option enables the use of the mylonics spi libraries.
+
+config MYL_UTILS_I2C
+	bool "Enable Mylonics I2C Utilities"
+	default y
+	depends on MYL_UTILS
+	select I2C
+	help
+	  This option enables the use of the mylonics i2c libraries.
+
 config MYL_UTILS_LOG
 	bool "Enable Mylonics Default Log Configuration"
   default y
@@ -14,7 +30,6 @@ config MYL_UTILS_LOG
 	select CBPRINTF_FP_SUPPORT
 	help
 	  This option enables myl_utils recommended log configuration
-
 
 config MYL_UTILS_USB_SERIAL
 	bool "Enable Mylonics USB Serial Implementation"

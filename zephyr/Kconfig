@@ -8,7 +8,7 @@ config MYL_UTILS
 
 config MYL_UTILS_SPI
 	bool "Enable Mylonics SPI Utilities"
-	default y
+	default n
 	depends on MYL_UTILS
 	select SPI
 	help
@@ -16,7 +16,7 @@ config MYL_UTILS_SPI
 
 config MYL_UTILS_I2C
 	bool "Enable Mylonics I2C Utilities"
-	default y
+	default n
 	depends on MYL_UTILS
 	select I2C
 	help

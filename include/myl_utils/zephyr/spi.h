@@ -8,7 +8,7 @@
 #include <zephyr/drivers/spi.h>
 
 #ifndef CONFIG_SPI
-#pragma error "Enable CONFIG_MYL_UTILS_SPI in kconfig (prj.conf)"
+#error Enable CONFIG_MYL_UTILS_SPI in kconfig (prj.conf)
 #endif
 
 class ZephyrSpiDevice : public Spi {

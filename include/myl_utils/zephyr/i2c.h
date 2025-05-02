@@ -16,7 +16,7 @@
 #include <zephyr/drivers/i2c.h>
 
 #ifndef CONFIG_I2C
-#pragma error "Enable CONFIG_MYL_UTILS_I2C in kconfig (prj.conf)"
+#error Enable CONFIG_MYL_UTILS_I2C in kconfig (prj.conf)
 #endif
 
 class ZephyrI2cDevice : public I2c {

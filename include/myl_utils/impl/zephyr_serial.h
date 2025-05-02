@@ -114,7 +114,7 @@ private:
 
     while (uart_irq_update(dev) && uart_irq_is_pending(dev))
     {
-      // LOG_MODULE_DECLARE(user, CONFIG_MYL_UTILS_LOG_LEVEL);
+      // LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
       if (uart_irq_rx_ready(dev))
       {
         int recv_len, rb_len;
@@ -193,6 +193,11 @@ uart_config_parity ToZephyrParity(UartParity parity)
   return UART_CFG_PARITY_ODD;
 }
 
+uart_config_data_bits ToZephyrDataBits(UartDataBits data_bits)
+{
+  return (uart_config_data_bits)data_bits;
+}
+
 class ZephyrSerialDevice : public ZephyrBasicSerialDevice
 {
 public:
@@ -213,6 +218,7 @@ public:
     uart_cfg_.baudrate = UartBaudEnumToValue(baudrate);
     uart_cfg_.stop_bits = ToZephyrStopBits(stop_bits);
     uart_cfg_.parity = ToZephyrParity(parity);
+    uart_cfg_.data_bits = ToZephyrDataBits(UartDataBits::EIGHT);
 
     uart_configure(dev_, &uart_cfg_);
 

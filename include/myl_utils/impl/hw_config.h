@@ -9,15 +9,12 @@
 #endif
 #define ALIGNMENT_VAR 32
 
-/** @brief This macro helps call a function during static initialization. 
+/** @brief This macro helps call a function during static initialization.
  */
 
-#define CALL_FUNCTION_ON_STATIC_INIT(function)                   \
-  class function##_class : NonCopyable<function##_class> \
-  {                                                      \
-  public:                                                \
-    function##_class() { function(); }                   \
-  }; \
+#define CALL_FUNCTION_ON_STATIC_INIT(function)             \
+  class function##_class : NonCopyable<function##_class> { \
+   public:                                                 \
+    function##_class() { function(); }                     \
+  };                                                       \
   function##_class function##_object;
-
-

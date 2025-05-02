@@ -48,19 +48,16 @@ static const struct usb_bos_capability_lpm bos_cap_lpm = {
     .bmAttributes = 0UL,
 };
 
-static void sample_fix_code_triple(struct usbd_context *uds_ctx,
-                                   const enum usbd_speed speed) {
+static void sample_fix_code_triple(struct usbd_context *uds_ctx, const enum usbd_speed speed) {
   /* Always use class code information from Interface Descriptors */
-  if (IS_ENABLED(CONFIG_USBD_CDC_ACM_CLASS) ||
-      IS_ENABLED(CONFIG_USBD_CDC_ECM_CLASS) ||
+  if (IS_ENABLED(CONFIG_USBD_CDC_ACM_CLASS) || IS_ENABLED(CONFIG_USBD_CDC_ECM_CLASS) ||
       IS_ENABLED(CONFIG_USBD_AUDIO2_CLASS)) {
     /*
      * Class with multiple interfaces have an Interface
      * Association Descriptor available, use an appropriate triple
      * to indicate it.
      */
-    usbd_device_set_code_triple(uds_ctx, speed, USB_BCC_MISCELLANEOUS, 0x02,
-                                0x01);
+    usbd_device_set_code_triple(uds_ctx, speed, USB_BCC_MISCELLANEOUS, 0x02, 0x01);
   } else {
     usbd_device_set_code_triple(uds_ctx, speed, 0, 0, 0);
   }
@@ -74,8 +71,8 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
    * controller, the Zephyr project vendor ID, and the sample product ID.
    * Zephyr project vendor ID must not be used outside of Zephyr samples.
    */
-  USBD_DEVICE_DEFINE(sample_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
-                     ZEPHYR_PROJECT_USB_VID, CONFIG_MYL_UTILS_USBD_PID);
+  USBD_DEVICE_DEFINE(sample_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)), ZEPHYR_PROJECT_USB_VID,
+                     CONFIG_MYL_UTILS_USBD_PID);
   /* doc device instantiation end */
 
   /* doc string instantiation start */
@@ -89,19 +86,14 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
   USBD_DESC_CONFIG_DEFINE(hs_cfg_desc, "HS Configuration");
 
   /* doc configuration instantiation start */
-  static const uint8_t attributes =
-      (IS_ENABLED(CONFIG_MYL_UTILS_USBD_SELF_POWERED) ? USB_SCD_SELF_POWERED
-                                                      : 0) |
-      (IS_ENABLED(CONFIG_MYL_UTILS_USBD_REMOTE_WAKEUP) ? USB_SCD_REMOTE_WAKEUP
-                                                       : 0);
+  static const uint8_t attributes = (IS_ENABLED(CONFIG_MYL_UTILS_USBD_SELF_POWERED) ? USB_SCD_SELF_POWERED : 0) |
+                                    (IS_ENABLED(CONFIG_MYL_UTILS_USBD_REMOTE_WAKEUP) ? USB_SCD_REMOTE_WAKEUP : 0);
 
   /* Full speed configuration */
-  USBD_CONFIGURATION_DEFINE(sample_fs_config, attributes,
-                            CONFIG_MYL_UTILS_USBD_MAX_POWER, &fs_cfg_desc);
+  USBD_CONFIGURATION_DEFINE(sample_fs_config, attributes, CONFIG_MYL_UTILS_USBD_MAX_POWER, &fs_cfg_desc);
 
   /* High speed configuration */
-  USBD_CONFIGURATION_DEFINE(sample_hs_config, attributes,
-                            CONFIG_MYL_UTILS_USBD_MAX_POWER, &hs_cfg_desc);
+  USBD_CONFIGURATION_DEFINE(sample_hs_config, attributes, CONFIG_MYL_UTILS_USBD_MAX_POWER, &hs_cfg_desc);
   /* doc configuration instantiation end */
 
   USBD_DESC_BOS_DEFINE(sample_usbext, sizeof(bos_cap_lpm), &bos_cap_lpm);
@@ -135,8 +127,7 @@ struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
   /* doc add string descriptor end */
 
   if (usbd_caps_speed(&sample_usbd) == USBD_SPEED_HS) {
-    err =
-        usbd_add_configuration(&sample_usbd, USBD_SPEED_HS, &sample_hs_config);
+    err = usbd_add_configuration(&sample_usbd, USBD_SPEED_HS, &sample_hs_config);
     if (err) {
       LOG_ERR("Failed to add High-Speed configuration");
       return NULL;

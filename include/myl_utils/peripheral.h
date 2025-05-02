@@ -3,8 +3,8 @@
 #include <functional>
 
 #include "buffer.h"
+#include "myl_utils/noncopyable.h"
 #include "stdint.h"
-#include "utils/noncopyable.h"
 
 enum class PacketType { Read, Write, WriteAndRead, WriteThenRead };
 
@@ -21,7 +21,7 @@ struct SpiPacket {
   std::function<void(bool)> chip_select = 0;
   std::function<void(Data &)> callback = 0;
 
-  SpiPacket(Data &tx_data, Data &rx_data) : tx_data(tx_data), rx_data(rx_data){};
+  SpiPacket(Data &tx_data, Data &rx_data) : tx_data(tx_data), rx_data(rx_data) {};
 };
 
 struct I2cPacket {
@@ -31,7 +31,7 @@ struct I2cPacket {
   PacketType type;
   std::function<void(Data &)> callback = 0;
 
-  I2cPacket(uint8_t addr, Data &tx_data, Data &rx_data) : addr(addr), tx_data(tx_data), rx_data(rx_data){};
+  I2cPacket(uint8_t addr, Data &tx_data, Data &rx_data) : addr(addr), tx_data(tx_data), rx_data(rx_data) {};
 };
 
 #define PACKET_HELPER(name, size)          \

@@ -4,7 +4,7 @@
  * SPI Zephyr Implementation
  */
 
-#include <utils/peripheral.h>
+#include <myl_utils/peripheral.h>
 #include <zephyr/drivers/spi.h>
 
 class ZephyrSpiDevice : public Spi {

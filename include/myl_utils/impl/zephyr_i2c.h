@@ -12,7 +12,7 @@
  *
  */
 
-#include <utils/peripheral.h>
+#include <myl_utils/peripheral.h>
 #include <zephyr/drivers/i2c.h>
 
 class ZephyrI2cDevice : public I2c {

@@ -22,21 +22,15 @@
 #define RX_BUFFER_SIZE 2048
 #define TX_BUFFER_SIZE 2048
 
-class ZephyrBasicSerialDevice : public SerialPort
-{
-public:
-  explicit ZephyrBasicSerialDevice(const struct device *dev,
-                                   bool initialize = true)
-      : dev_(dev)
-  {
-    if (initialize)
-    {
+class ZephyrBasicSerialDevice : public SerialPort {
+ public:
+  explicit ZephyrBasicSerialDevice(const struct device *dev, bool initialize = true) : dev_(dev) {
+    if (initialize) {
       Initialize();
     }
   };
 
-  bool Initialize()
-  {
+  bool Initialize() {
     k_sem_init(&new_rx_data, 0, 1);
     ring_buf_init(&rx_rb_, sizeof(rx_buffer_), rx_buffer_);
     ring_buf_init(&tx_rb_, sizeof(tx_buffer_), tx_buffer_);
@@ -45,28 +39,23 @@ public:
     return true;
   }
 
-  bool Start()
-  {
+  bool Start() {
     transmitting_ = false;
     uart_irq_rx_enable(dev_);
     return true;
   };
 
-  void PutC(char c)
-  {
+  void PutC(char c) {
     ring_buf_put(&tx_rb_, (uint8_t *)&c, 1);
-    if (!transmitting_)
-    {
+    if (!transmitting_) {
       transmitting_ = true;
       uart_irq_tx_enable(dev_);
     }
   }
 
-  void PutC(char c, bool flush)
-  {
+  void PutC(char c, bool flush) {
     ring_buf_put(&tx_rb_, (uint8_t *)&c, 1);
-    if (flush || !transmitting_ || (ring_buf_space_get(&tx_rb_) == 0))
-    {
+    if (flush || !transmitting_ || (ring_buf_space_get(&tx_rb_) == 0)) {
       transmitting_ = true;
       uart_irq_tx_enable(dev_);
     }
@@ -74,17 +63,14 @@ public:
 
   bool Readable() { return ring_buf_size_get(&rx_rb_); };
 
-  char GetC()
-  {
+  char GetC() {
     uint8_t byte;
     ring_buf_get(&rx_rb_, &byte, 1);
     return byte;
   };
 
-  bool GetC(char &c, size_t timeout_ms)
-  {
-    if (Readable() || (k_sem_take(&new_rx_data, K_MSEC(timeout_ms)) == 0))
-    {
+  bool GetC(char &c, size_t timeout_ms) {
+    if (Readable() || (k_sem_take(&new_rx_data, K_MSEC(timeout_ms)) == 0)) {
       uint8_t byte;
       ring_buf_get(&rx_rb_, &byte, 1);
       c = byte;
@@ -93,10 +79,10 @@ public:
     return false;
   };
 
-protected:
+ protected:
   void NewRxPacketAvailable() {}
 
-private:
+ private:
   const struct device *dev_;
   uint8_t rx_buffer_[RX_BUFFER_SIZE];
   uint8_t tx_buffer_[TX_BUFFER_SIZE];
@@ -108,49 +94,41 @@ private:
 
   volatile bool transmitting_{false};
 
-  static void UartIntHandler(const struct device *dev, void *user_data)
-  {
+  static void UartIntHandler(const struct device *dev, void *user_data) {
     ZephyrBasicSerialDevice *ctx = (ZephyrBasicSerialDevice *)user_data;
 
-    while (uart_irq_update(dev) && uart_irq_is_pending(dev))
-    {
+    while (uart_irq_update(dev) && uart_irq_is_pending(dev)) {
       // LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
-      if (uart_irq_rx_ready(dev))
-      {
+      if (uart_irq_rx_ready(dev)) {
         int recv_len, rb_len;
         uint8_t buffer[64];
         size_t len = MIN(ring_buf_space_get(&ctx->rx_rb_), sizeof(buffer));
 
-        if (len == 0)
-        {
+        if (len == 0) {
           // buffer full throw away some data
           ring_buf_get(&ctx->rx_rb_, buffer, sizeof(buffer));
           len = MIN(ring_buf_space_get(&ctx->rx_rb_), sizeof(buffer));
         }
 
         recv_len = uart_fifo_read(dev, buffer, len);
-        if (recv_len < 0)
-        {
+        if (recv_len < 0) {
           //  LOG_ERR("Failed to read UART FIFO");
           recv_len = 0;
         };
 
         rb_len = ring_buf_put(&ctx->rx_rb_, buffer, recv_len);
         k_sem_give(&ctx->new_rx_data);
-        if (rb_len < recv_len)
-        {
+        if (rb_len < recv_len) {
           // LOG_ERR("Drop %u bytes", recv_len - rb_len);
         }
       }
 
-      if (uart_irq_tx_ready(dev))
-      {
+      if (uart_irq_tx_ready(dev)) {
         uint8_t buffer[64];
         int rb_len, send_len;
 
         rb_len = ring_buf_get(&ctx->tx_rb_, buffer, sizeof(buffer));
-        if (!rb_len)
-        {
+        if (!rb_len) {
           // LOG_DBG("Ring buffer empty, disable TX IRQ");
           uart_irq_tx_disable(dev);
           ctx->transmitting_ = false;
@@ -158,8 +136,7 @@ private:
         }
 
         send_len = uart_fifo_fill(dev, buffer, rb_len);
-        if (send_len < rb_len)
-        {
+        if (send_len < rb_len) {
           // LOG_ERR("Drop %d bytes", rb_len - send_len);
         }
 
@@ -169,49 +146,36 @@ private:
   }
 };
 
-uart_config_stop_bits ToZephyrStopBits(UartStopBits stop_bits)
-{
-  if (stop_bits == UartStopBits::TWO)
-  {
+uart_config_stop_bits ToZephyrStopBits(UartStopBits stop_bits) {
+  if (stop_bits == UartStopBits::TWO) {
     return UART_CFG_STOP_BITS_2;
   }
   return UART_CFG_STOP_BITS_1;
 }
 
-uart_config_parity ToZephyrParity(UartParity parity)
-{
-  if (parity == UartParity::NONE)
-  {
+uart_config_parity ToZephyrParity(UartParity parity) {
+  if (parity == UartParity::NONE) {
     return UART_CFG_PARITY_NONE;
   }
 
-  if (parity == UartParity::EVEN)
-  {
+  if (parity == UartParity::EVEN) {
     return UART_CFG_PARITY_EVEN;
   }
 
   return UART_CFG_PARITY_ODD;
 }
 
-uart_config_data_bits ToZephyrDataBits(UartDataBits data_bits)
-{
-  return (uart_config_data_bits)data_bits;
-}
+uart_config_data_bits ToZephyrDataBits(UartDataBits data_bits) { return (uart_config_data_bits)data_bits; }
 
-class ZephyrSerialDevice : public ZephyrBasicSerialDevice
-{
-public:
-  explicit ZephyrSerialDevice(const struct device *dev)
-      : ZephyrBasicSerialDevice(dev), dev_(dev)
-  {
+class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
+ public:
+  explicit ZephyrSerialDevice(const struct device *dev) : ZephyrBasicSerialDevice(dev), dev_(dev) {
     // uart_configure(dev_, &uart_cfg_);
 
     Start();
   };
 
-  void ReconfigureUart(UartBaud baudrate, UartParity parity,
-                       UartStopBits stop_bits)
-  {
+  void ReconfigureUart(UartBaud baudrate, UartParity parity, UartStopBits stop_bits) {
     uart_irq_rx_disable(dev_);
     uart_irq_tx_disable(dev_);
 
@@ -225,7 +189,7 @@ public:
     Start();
   }
 
-private:
+ private:
   const struct device *dev_;
 
   struct uart_config uart_cfg_ = {
@@ -238,27 +202,22 @@ private:
 };
 
 #ifdef CONFIG_MYL_UTILS_USB_SERIAL
-class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice
-{
-public:
+class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
+ public:
   explicit ZephyrUsbSerialDevice(const struct device *dev)
-      : ZephyrBasicSerialDevice(dev, false),
-        dev_(dev) {
+      : ZephyrBasicSerialDevice(dev, false), dev_(dev) {
 
         };
 
-  bool Start(bool connect_blocking = false)
-  {
+  bool Start(bool connect_blocking = false) {
     LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
-    if (!device_is_ready(dev_))
-    {
+    if (!device_is_ready(dev_)) {
       LOG_ERR("CDC ACM device not ready");
       return false;
     }
     InitializeHW();
 
-    if (connect_blocking && !connected)
-    {
+    if (connect_blocking && !connected) {
       k_sem_take(&dtr_sem, K_FOREVER);
       connected = true;
     }
@@ -268,28 +227,23 @@ public:
     return true;
   }
 
-private:
-  static int InitializeHW()
-  {
+ private:
+  static int InitializeHW() {
     LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
     int ret = 0;
-    if (!hw_initialized)
-    {
+    if (!hw_initialized) {
       connected = false;
       k_sem_init(&dtr_sem, 0, 1);
       sample_usbd = sample_usbd_init_device(usb_hw_msg_cb);
-      if (sample_usbd == NULL)
-      {
+      if (sample_usbd == NULL) {
         LOG_ERR("Failed to initialize USB device");
         ret = -ENODEV;
         return ret;
       }
 
-      if (!usbd_can_detect_vbus(sample_usbd))
-      {
+      if (!usbd_can_detect_vbus(sample_usbd)) {
         int err = usbd_enable(sample_usbd);
-        if (err)
-        {
+        if (err) {
           LOG_ERR("Failed to enable device support");
           ret = err;
           return ret;
@@ -304,38 +258,29 @@ private:
     return ret;
   }
 
-  static void usb_hw_msg_cb(struct usbd_context *const ctx,
-                            const struct usbd_msg *msg)
-  {
+  static void usb_hw_msg_cb(struct usbd_context *const ctx, const struct usbd_msg *msg) {
     LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
     LOG_INF("USBD message: %s", usbd_msg_type_string(msg->type));
 
-    if (usbd_can_detect_vbus(ctx))
-    {
-      if (msg->type == USBD_MSG_VBUS_READY)
-      {
-        if (usbd_enable(ctx))
-        {
+    if (usbd_can_detect_vbus(ctx)) {
+      if (msg->type == USBD_MSG_VBUS_READY) {
+        if (usbd_enable(ctx)) {
           LOG_ERR("Failed to enable device support");
         }
       }
 
-      if (msg->type == USBD_MSG_VBUS_REMOVED)
-      {
-        if (usbd_disable(ctx))
-        {
+      if (msg->type == USBD_MSG_VBUS_REMOVED) {
+        if (usbd_disable(ctx)) {
           LOG_ERR("Failed to disable device support");
         }
       }
     }
 
-    if (msg->type == USBD_MSG_CDC_ACM_CONTROL_LINE_STATE)
-    {
+    if (msg->type == USBD_MSG_CDC_ACM_CONTROL_LINE_STATE) {
       uint32_t dtr = 0U;
 
       uart_line_ctrl_get(msg->dev, UART_LINE_CTRL_DTR, &dtr);
-      if (dtr)
-      {
+      if (dtr) {
         k_sem_give(&dtr_sem);
       }
     }

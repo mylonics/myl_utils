@@ -36,6 +36,16 @@
                          BT_GATT_PERM_READ_ENCRYPT, read_callback, NULL, NULL),                         \
       BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
 
+#define BLE_RW_CHARAC_DECLARATION(name, read_callback, write_callback)                                 \
+  BT_GATT_CHARACTERISTIC((const struct bt_uuid *)&name##_CHAR, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE, \
+                         BT_GATT_PERM_READ | BT_GATT_PERM_WRITE, read_callback, write_callback, NULL), \
+      BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+
+#define BLE_RW_ENCRYPT_CHARAC_DECLARATION(name, read_callback, write_callback)                                         \
+  BT_GATT_CHARACTERISTIC((const struct bt_uuid *)&name##_CHAR, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,                 \
+                         BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT, read_callback, write_callback, NULL), \
+      BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+
 #define BLE_DEFAULT_AD_SD()                                                                                  \
   static const struct bt_data ad[] = {BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR))}; \
   static const struct bt_data sd[] = {                                                                       \

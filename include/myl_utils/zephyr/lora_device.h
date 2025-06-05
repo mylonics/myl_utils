@@ -31,15 +31,15 @@ struct message_header {
   uint8_t checksum_passed;
 };
 
-#define MESSAGE_TIME_MS 1000
+#define MESSAGE_TIME_MS 500
 
 typedef void (*lora_msg_cb)(const struct network_header, const struct message_header);
 
 class LoraDevice {
  public:
   enum class NETWORK_MSG_IDS : uint8_t { BROADCAST, REGISTER, REGISTER_REPLY, NODE_REQUEST, NODE_REPLY };
-  LoraDevice(const struct device *const lora_dev, uint8_t net_id, lora_msg_cb msg_cb)
-      : lora_dev_{lora_dev}, net_id_{net_id}, msg_cb_{msg_cb} {
+  LoraDevice(const struct device *const lora_dev, uint8_t net_id, lora_msg_cb msg_cb, bool isServer)
+      : lora_dev_{lora_dev}, net_id_{net_id}, msg_cb_{msg_cb}, isServer_{isServer} {
     if (!device_is_ready(lora_dev)) {
       LOG_ERR("%s Device not ready", lora_dev->name);
       return;
@@ -54,7 +54,15 @@ class LoraDevice {
     config.tx_power = 14;
     config.tx = true;
 
-    enable_rx();
+    if (!isServer_) {
+      config.tx = false;
+      rx_message_time = 2000;
+    }
+
+    int ret = lora_config(lora_dev_, &config);
+    if (ret < 0) {
+      LOG_ERR("LoRa config failed %d", ret);
+    }
   }
 
  protected:
@@ -63,7 +71,7 @@ class LoraDevice {
   uint8_t node_id_{};
   bool registered_{};
 
-  bool lora_transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
+  bool transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
     if (msg_id && !registered_) {
       LOG_INF("Can't transmit non-network messages before registration");
       return false;
@@ -77,8 +85,9 @@ class LoraDevice {
     uint16_t checksum = fletcher_checksum_calculation(msg_data, msg_length);
 
     uint8_t total_parts = (msg_length / MAX_DATA_LENGTH) + 1;
-
-    enable_tx();
+    if (!isServer_) {
+      enable_tx();
+    }
     for (int i = 0; i < total_parts; i++) {
       output_buffer[4] = (i + 1) << 4 | total_parts;
 
@@ -96,23 +105,101 @@ class LoraDevice {
       int ret = lora_send(lora_dev_, output_buffer, 6 + output_buffer[5]);
       if (ret < 0) {
         LOG_ERR("LoRa Send failed %d msg id %d first byte %d", ret, msg_id, msg_data[0]);
-        enable_rx();
+        if (!isServer_) {
+          enable_rx();
+        }
         return false;
       }
     }
-    enable_rx();
+    if (!isServer_) {
+      enable_rx();
+    }
     return true;
   };
 
+  void receive() {
+    int ret;
+    if (isServer_) {
+      if (!enable_rx()) {
+        return;
+      }
+    }
+
+    int16_t rssi;
+    int8_t snr;
+    uint8_t *data = raw_rx_buffer;
+    LOG_INF("Starting Receive");
+    ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi, &snr);
+    if (ret < 0) {
+      LOG_INF("RX Error %d", ret);
+      for (int i = 0; i < 100; i++) {
+        raw_rx_buffer[i] = 0;
+      }
+      return;
+    }
+
+    if (isServer_) {
+      if (!enable_tx()) {
+        return;
+      }
+    }
+
+    uint8_t current_part = data[4] >> 4;
+    if (multipart) {
+      if (rx_net_header.network == data[0] && rx_net_header.dest == data[2] && rx_net_header.src == data[1]) {
+        if (rx_msg_header.msg_id != data[3]) {
+          multipart = false;
+          return;
+        }
+      }
+    } else {
+      rx_msg_header.length = 0;
+      rx_net_header.network = data[0];
+      rx_net_header.src = data[1];
+      rx_net_header.dest = data[2];
+
+      rx_msg_header.msg_id = data[3];
+      total_parts = data[4] & 0xF;
+      if (total_parts > 1) {
+        multipart = true;
+      } else {
+        multipart = false;
+      }
+    }
+
+    memcpy(input_buffer + rx_msg_header.length, data + 6, data[5]);
+    rx_msg_header.length += data[5] - 2;
+
+    // LOG_INF("LoRa RX RSSI: %d dBm, SNR: %d dB", rssi, snr);
+    if (current_part == total_parts) {
+      multipart = false;
+      rx_msg_header.data = input_buffer;
+      uint16_t checksum = fletcher_checksum_calculation(input_buffer, rx_msg_header.length);
+      if ((input_buffer[rx_msg_header.length] | input_buffer[rx_msg_header.length + 1] << 8) == checksum) {
+        rx_msg_header.checksum_passed = true;
+      } else {
+        rx_msg_header.checksum_passed = false;
+      }
+
+      handle_message();
+      if (registered_ && rx_msg_header.msg_id) {
+        msg_cb_(rx_net_header, rx_msg_header);
+      }
+    }
+  }
+
  private:
-  const struct device *const lora_dev_;
+  const struct device *lora_dev_;
   uint8_t net_id_;
   uint8_t mac_id_;
   lora_msg_cb msg_cb_;
+  bool isServer_{};
+  size_t rx_message_time{MESSAGE_TIME_MS};
 
   bool reply = false;
 
   uint8_t output_buffer[256];
+  uint8_t raw_rx_buffer[255];
   uint8_t input_buffer[2048];
   bool multipart = false;
   uint8_t total_parts;
@@ -122,80 +209,24 @@ class LoraDevice {
 
   virtual void handle_message() = 0;
 
-  static void lora_receive_cb(const struct device *dev, uint8_t *data, uint16_t size, int16_t rssi, int8_t snr,
-                              void *user_data) {
-    ARG_UNUSED(dev);
-    ARG_UNUSED(size);
-
-    LoraDevice *device = (LoraDevice *)user_data;
-    ARG_UNUSED(user_data);
-
-    uint8_t current_part = data[4] >> 4;
-    if (device->multipart) {
-      if (device->rx_net_header.network == data[0] && device->rx_net_header.dest == data[2] &&
-          device->rx_net_header.src == data[1]) {
-        if (device->rx_msg_header.msg_id != data[3]) {
-          device->multipart = false;
-          return;
-        }
-      }
-    } else {
-      device->rx_msg_header.length = 0;
-      device->rx_net_header.network = data[0];
-      device->rx_net_header.src = data[1];
-      device->rx_net_header.dest = data[2];
-
-      device->rx_msg_header.msg_id = data[3];
-      device->total_parts = data[4] & 0xF;
-      if (device->total_parts > 1) {
-        device->multipart = true;
-      } else {
-        device->multipart = false;
-      }
-    }
-
-    memcpy(device->input_buffer + device->rx_msg_header.length, data + 6, data[5]);
-    device->rx_msg_header.length += data[5] - 2;
-
-    // LOG_INF("LoRa RX RSSI: %d dBm, SNR: %d dB", rssi, snr);
-    if (current_part == device->total_parts) {
-      device->multipart = false;
-      device->rx_msg_header.data = device->input_buffer;
-      uint16_t checksum = fletcher_checksum_calculation(device->input_buffer, device->rx_msg_header.length);
-      if ((device->input_buffer[device->rx_msg_header.length] | device->input_buffer[device->rx_msg_header.length + 1]
-                                                                    << 8) == checksum) {
-        device->rx_msg_header.checksum_passed = true;
-      } else {
-        device->rx_msg_header.checksum_passed = false;
-      }
-
-      device->handle_message();
-      if (device->registered_ && device->rx_msg_header.msg_id) {
-        device->msg_cb_(device->rx_net_header, device->rx_msg_header);
-      }
-    }
-  }
-
-  void enable_tx() {
-    lora_recv_async(lora_dev_, NULL, NULL);
+  bool enable_tx() {
     config.tx = true;
     int ret = lora_config(lora_dev_, &config);
     if (ret < 0) {
       LOG_ERR("LoRa TX config failed %d", ret);
-      return;
+      return false;
     }
+    return true;
   }
 
-  void enable_rx() {
-    lora_recv_async(lora_dev_, NULL, NULL);
+  bool enable_rx() {
     config.tx = false;
     int ret = lora_config(lora_dev_, &config);
     if (ret < 0) {
       LOG_ERR("LoRa RX config failed %d", ret);
-      return;
+      return false;
     }
-
-    lora_recv_async(lora_dev_, lora_receive_cb, this);
+    return true;
   }
 
   static uint16_t fletcher_checksum_calculation(uint8_t *buffer, uint8_t data_length) {

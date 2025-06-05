@@ -11,10 +11,8 @@ struct registered_client {
 class LoraServer : public LoraDevice {
  public:
   LoraServer(const struct device *const lora_dev, uint8_t net_id, lora_msg_cb msg_cb)
-      : LoraDevice{lora_dev, net_id, msg_cb} {
+      : LoraDevice{lora_dev, net_id, msg_cb, true} {
     registered_ = true;
-
-    k_sem_init(&my_sem, 1, 1);
 
     k_mutex_init(&my_mutex);
   };
@@ -22,18 +20,23 @@ class LoraServer : public LoraDevice {
   bool SendMessage(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
     k_mutex_lock(&my_mutex, K_FOREVER);
     LOG_INF("Sending Msg %d to dest %d", msg_id, dest_id);
-    bool ret = lora_transmit(dest_id, msg_id, msg_data, msg_length);
+    bool ret = transmit(dest_id, msg_id, msg_data, msg_length);
     k_mutex_unlock(&my_mutex);
     return ret;
   }
 
   void Runner() {
     while (true) {
+      k_mutex_lock(&my_mutex, K_FOREVER);
       register_clients();
       for (size_t i = 0; i < registered_client_length; i++) {
         send_node_request_packet(clients[i].node_id);
+        receive();
       }
       send_node_request_packet(0);
+      receive();
+      k_mutex_unlock(&my_mutex);
+      k_sleep(K_MSEC(1));
     }
   }
 
@@ -43,7 +46,6 @@ class LoraServer : public LoraDevice {
   bool transmitting{};
   bool waiting{};
   uint64_t send_message_time{};
-  struct k_sem my_sem;
   struct k_mutex my_mutex;
   uint32_t client_mac_{};
 
@@ -68,12 +70,13 @@ class LoraServer : public LoraDevice {
     } else {
       LOG_INF("Re-Registering Client %d %d", client_mac, client_node_id);
     }
+
+    clients[client_node_id - 1].missed_replies = 10;
   }
 
   void register_clients() {
-    k_mutex_lock(&my_mutex, K_FOREVER);
     for (size_t i = 0; i < registered_client_length; i++) {
-      if (clients[i].missed_replies > 10) {
+      if (clients[i].missed_replies >= 10) {
         clients[i].missed_replies = 0;
         uint8_t data[5];
 
@@ -85,16 +88,12 @@ class LoraServer : public LoraDevice {
         data[5] = clients[i].mac_id;
 
         LOG_INF("Sending Registration to node %d mac %d", clients[i].node_id, clients[i].mac_id);
-        lora_transmit(0, 0, data, 6);
+        transmit(0, 0, data, 6);
       }
     }
-
-    k_mutex_unlock(&my_mutex);
   }
 
   void send_node_request_packet(uint8_t node_id) {
-    k_mutex_lock(&my_mutex, K_FOREVER);
-    k_sem_take(&my_sem, K_MSEC(MESSAGE_TIME_MS));
     uint8_t net_msg_id = (uint8_t)NETWORK_MSG_IDS::BROADCAST;
     if (node_id) {
       net_msg_id = (uint8_t)NETWORK_MSG_IDS::NODE_REQUEST;
@@ -102,8 +101,7 @@ class LoraServer : public LoraDevice {
     }
 
     LOG_INF("Sending Node Request %d ", node_id);
-    lora_transmit(node_id, 0, &net_msg_id, 1);
-    k_mutex_unlock(&my_mutex);
+    transmit(node_id, 0, &net_msg_id, 1);
   }
 
   void handle_message() {
@@ -128,6 +126,5 @@ class LoraServer : public LoraDevice {
       // log in that client is still active or not
       // rx_net_header.src;
     }
-    k_sem_give(&my_sem);
   }
 };

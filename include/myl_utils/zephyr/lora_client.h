@@ -5,9 +5,7 @@
 class LoraClient : public LoraDevice {
  public:
   LoraClient(const struct device *const lora_dev, uint8_t net_id, uint32_t mac_id, lora_msg_cb msg_cb)
-      : LoraDevice{lora_dev, net_id, msg_cb}, mac_id_{mac_id} {
-    k_sem_init(&my_sem, 0, 1);
-  };
+      : LoraDevice{lora_dev, net_id, msg_cb, false}, mac_id_{mac_id} {};
 
   void queue_message(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint16_t msg_length) {
     if (msg_length < max_queue_msg_size_) {
@@ -28,25 +26,26 @@ class LoraClient : public LoraDevice {
     data[4] = mac_id_;
 
     LOG_INF("Sending Registration request");
-    lora_transmit(0, 0, data, 5);
+    transmit(0, 0, data, 5);
   }
 
   void Runner() {
     while (true) {
-      k_sem_take(&my_sem, K_FOREVER);
-
-      // k_sleep(K_MSEC(100));
-
+      receive();
       if (registration_request) {
         register_onto_network();
         registration_request = false;
-      } else if (msg_queued_) {
-        lora_transmit(queued_destination_, queued_msg_header_.msg_id, queued_buffer_, queued_msg_header_.length);
-        msg_queued_ = false;
-      } else {
-        uint8_t data = (uint8_t)NETWORK_MSG_IDS::NODE_REPLY;
-        LOG_INF("Sending NODE reply");
-        lora_transmit(0, 0, &data, 1);
+      } else if (reply_request) {
+        if (msg_queued_) {
+          transmit(queued_destination_, queued_msg_header_.msg_id, queued_buffer_, queued_msg_header_.length);
+          msg_queued_ = false;
+          reply_request = false;
+        } else {
+          uint8_t data = (uint8_t)NETWORK_MSG_IDS::NODE_REPLY;
+          LOG_INF("Sending NODE reply");
+          transmit(0, 0, &data, 1);
+          reply_request = false;
+        }
       }
     }
   }
@@ -55,8 +54,6 @@ class LoraClient : public LoraDevice {
   uint32_t mac_id_;
   uint64_t last_sync_time_;
 
-  struct k_sem my_sem;
-
   static const size_t max_queue_msg_size_ = 1024;
   uint8_t queued_destination_;
   message_header queued_msg_header_;
@@ -64,6 +61,7 @@ class LoraClient : public LoraDevice {
   bool msg_queued_{};
   size_t no_request_count{};
   bool registration_request{};
+  bool reply_request{};
 
   void handle_message() {
     uint32_t mac_id = 0;
@@ -73,8 +71,13 @@ class LoraClient : public LoraDevice {
         case NETWORK_MSG_IDS::BROADCAST:
           if (!registered_) {
             registration_request = true;
-
-            k_sem_give(&my_sem);
+          } else {
+            no_request_count++;
+            if (no_request_count > 5) {
+              registered_ = false;
+              registration_request = true;
+              no_request_count = 0;
+            }
           }
           break;
 
@@ -88,14 +91,11 @@ class LoraClient : public LoraDevice {
           break;
 
         case NETWORK_MSG_IDS::NODE_REQUEST:
-          if (no_request_count > 100) {
-            registered_ = false;
-            no_request_count = 0;
-          }
-          no_request_count++;
-          if (rx_net_header.dest == node_id_) {
-            no_request_count = 0;
-            k_sem_give(&my_sem);
+          if (!registration_request) {
+            if (rx_net_header.dest == node_id_) {
+              no_request_count = 0;
+              reply_request = true;
+            }
           }
           break;
 

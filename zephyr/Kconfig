@@ -35,6 +35,14 @@ config MYL_UTILS_I2C
 	help
 	  This option enables the use of the mylonics i2c libraries.
 
+config MYL_UTILS_LORA
+	bool "Enable Mylonics Lora Utilities"
+	default n
+	depends on MYL_UTILS
+	select LORA
+	help
+	  This option enables the use of the mylonics lora libraries.
+
 config MYL_UTILS_LOG
 	bool "Enable Mylonics Default Log Configuration"
   default y

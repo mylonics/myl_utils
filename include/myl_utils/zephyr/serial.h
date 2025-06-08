@@ -26,6 +26,9 @@
 #define RX_BUFFER_SIZE 2048
 #define TX_BUFFER_SIZE 2048
 
+class ZephyrUsbSerialDevice;
+class ZephyrSerialDevice;
+
 class ZephyrBasicSerialDevice : public SerialPort {
  public:
   explicit ZephyrBasicSerialDevice(const struct device *dev, bool initialize = true) : dev_(dev) {
@@ -39,7 +42,6 @@ class ZephyrBasicSerialDevice : public SerialPort {
     ring_buf_init(&rx_rb_, sizeof(rx_buffer_), rx_buffer_);
     ring_buf_init(&tx_rb_, sizeof(tx_buffer_), tx_buffer_);
 
-    uart_irq_callback_user_data_set(dev_, UartIntHandler, (void *)this);
     return true;
   }
 
@@ -99,9 +101,10 @@ class ZephyrBasicSerialDevice : public SerialPort {
   };
 
  protected:
+  friend ZephyrUsbSerialDevice;
+  friend ZephyrSerialDevice;
   void NewRxPacketAvailable() {}
 
- private:
   const struct device *dev_;
   uint8_t rx_buffer_[RX_BUFFER_SIZE];
   uint8_t tx_buffer_[TX_BUFFER_SIZE];
@@ -112,7 +115,136 @@ class ZephyrBasicSerialDevice : public SerialPort {
   struct k_sem new_rx_data;
 
   volatile bool transmitting_{false};
+};
 
+uart_config_stop_bits ToZephyrStopBits(UartStopBits stop_bits) {
+  if (stop_bits == UartStopBits::TWO) {
+    return UART_CFG_STOP_BITS_2;
+  }
+  return UART_CFG_STOP_BITS_1;
+}
+
+uart_config_parity ToZephyrParity(UartParity parity) {
+  if (parity == UartParity::NONE) {
+    return UART_CFG_PARITY_NONE;
+  }
+
+  if (parity == UartParity::EVEN) {
+    return UART_CFG_PARITY_EVEN;
+  }
+
+  return UART_CFG_PARITY_ODD;
+}
+
+uart_config_data_bits ToZephyrDataBits(UartDataBits data_bits) { return (uart_config_data_bits)data_bits; }
+
+class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
+ public:
+  explicit ZephyrSerialDevice(const struct device *dev) : ZephyrBasicSerialDevice(dev), dev_(dev) {
+    // uart_configure(dev_, &uart_cfg_);
+
+    uart_irq_callback_user_data_set(dev_, UartIntHandler, (void *)this);
+
+    Start();
+  };
+
+  void ReconfigureUart(UartBaud baudrate, UartParity parity, UartStopBits stop_bits) {
+    uart_irq_rx_disable(dev_);
+    uart_irq_tx_disable(dev_);
+
+    uart_cfg_.baudrate = UartBaudEnumToValue(baudrate);
+    uart_cfg_.stop_bits = ToZephyrStopBits(stop_bits);
+    uart_cfg_.parity = ToZephyrParity(parity);
+    uart_cfg_.data_bits = ToZephyrDataBits(UartDataBits::EIGHT);
+
+    uart_configure(dev_, &uart_cfg_);
+
+    Start();
+  }
+
+ private:
+  static void UartIntHandler(const struct device *dev, void *user_data) {
+    int ret = uart_irq_update(dev);
+    if (ret) {
+      ret = uart_irq_is_pending(dev);
+    }
+    ZephyrBasicSerialDevice *ctx = (ZephyrBasicSerialDevice *)user_data;
+
+    if (ret && uart_irq_rx_ready(dev)) {
+      do {
+        uint8_t *data;
+        size_t size = ring_buf_put_claim(&ctx->rx_rb_, &data, HW_BUFFER_SIZE / 2);
+        if (size) {
+          size_t rx_size = uart_fifo_read(dev, data, size);
+          int err = ring_buf_put_finish(&ctx->rx_rb_, rx_size);
+
+        } else {
+          // buffer overflow and we need to get rid of the data from the hw so
+          // that there isnt an infinite loop
+
+          // int err = ring_buf_put_finish(&ctx->rx_rb_, 0);
+          uint8_t data[16];
+          size_t read = uart_fifo_read(dev, data, 16);
+          ring_buf_put(&ctx->rx_rb_, data, read);
+        }
+      } while (uart_irq_rx_ready(dev));
+      uart_irq_rx_enable(dev);
+    }
+
+    if (uart_irq_tx_ready(dev)) {
+      uint8_t *data;
+      size_t tx_size = ring_buf_get_claim(&ctx->tx_rb_, &data, HW_BUFFER_SIZE / 2);
+      if (tx_size) {
+        size_t sent = uart_fifo_fill(dev, data, tx_size);
+        ring_buf_get_finish(&ctx->tx_rb_, sent);
+      } else {
+        // ring_buf_get_finish(&ctx->tx_rb_, 0);
+        ctx->transmitting_ = false;
+        uart_irq_tx_disable(dev);
+      }
+    }
+  }
+
+  const struct device *dev_;
+
+  struct uart_config uart_cfg_ = {
+      .baudrate = 9600,
+      .parity = UART_CFG_PARITY_ODD,
+      .stop_bits = UART_CFG_STOP_BITS_1,
+      .data_bits = UART_CFG_DATA_BITS_8,
+      .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
+  };
+};
+
+#ifdef CONFIG_MYL_UTILS_USB_SERIAL
+class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
+ public:
+  explicit ZephyrUsbSerialDevice(const struct device *dev)
+      : ZephyrBasicSerialDevice(dev, false), dev_(dev) {
+
+        };
+
+  bool Start(bool connect_blocking = false) {
+    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+    if (!device_is_ready(dev_)) {
+      LOG_ERR("CDC ACM device not ready");
+      return false;
+    }
+    InitializeHW();
+
+    if (connect_blocking && !connected) {
+      k_sem_take(&dtr_sem, K_FOREVER);
+      connected = true;
+    }
+
+    Initialize();
+
+    uart_irq_callback_user_data_set(dev_, UartIntHandler, (void *)this);
+    uart_irq_rx_enable(dev_);
+    return true;
+  }
+
+ private:
   static void UartIntHandler(const struct device *dev, void *user_data) {
     ZephyrBasicSerialDevice *ctx = (ZephyrBasicSerialDevice *)user_data;
 
@@ -163,90 +295,7 @@ class ZephyrBasicSerialDevice : public SerialPort {
       }
     }
   }
-};
 
-uart_config_stop_bits ToZephyrStopBits(UartStopBits stop_bits) {
-  if (stop_bits == UartStopBits::TWO) {
-    return UART_CFG_STOP_BITS_2;
-  }
-  return UART_CFG_STOP_BITS_1;
-}
-
-uart_config_parity ToZephyrParity(UartParity parity) {
-  if (parity == UartParity::NONE) {
-    return UART_CFG_PARITY_NONE;
-  }
-
-  if (parity == UartParity::EVEN) {
-    return UART_CFG_PARITY_EVEN;
-  }
-
-  return UART_CFG_PARITY_ODD;
-}
-
-uart_config_data_bits ToZephyrDataBits(UartDataBits data_bits) { return (uart_config_data_bits)data_bits; }
-
-class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
- public:
-  explicit ZephyrSerialDevice(const struct device *dev) : ZephyrBasicSerialDevice(dev), dev_(dev) {
-    // uart_configure(dev_, &uart_cfg_);
-
-    Start();
-  };
-
-  void ReconfigureUart(UartBaud baudrate, UartParity parity, UartStopBits stop_bits) {
-    uart_irq_rx_disable(dev_);
-    uart_irq_tx_disable(dev_);
-
-    uart_cfg_.baudrate = UartBaudEnumToValue(baudrate);
-    uart_cfg_.stop_bits = ToZephyrStopBits(stop_bits);
-    uart_cfg_.parity = ToZephyrParity(parity);
-    uart_cfg_.data_bits = ToZephyrDataBits(UartDataBits::EIGHT);
-
-    uart_configure(dev_, &uart_cfg_);
-
-    Start();
-  }
-
- private:
-  const struct device *dev_;
-
-  struct uart_config uart_cfg_ = {
-      .baudrate = 9600,
-      .parity = UART_CFG_PARITY_ODD,
-      .stop_bits = UART_CFG_STOP_BITS_1,
-      .data_bits = UART_CFG_DATA_BITS_8,
-      .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
-  };
-};
-
-#ifdef CONFIG_MYL_UTILS_USB_SERIAL
-class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
- public:
-  explicit ZephyrUsbSerialDevice(const struct device *dev)
-      : ZephyrBasicSerialDevice(dev, false), dev_(dev) {
-
-        };
-
-  bool Start(bool connect_blocking = false) {
-    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
-    if (!device_is_ready(dev_)) {
-      LOG_ERR("CDC ACM device not ready");
-      return false;
-    }
-    InitializeHW();
-
-    if (connect_blocking && !connected) {
-      k_sem_take(&dtr_sem, K_FOREVER);
-      connected = true;
-    }
-
-    Initialize();
-    uart_irq_rx_enable(dev_);
-    return true;
-  }
-
- private:
   static int InitializeHW() {
     LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
     int ret = 0;

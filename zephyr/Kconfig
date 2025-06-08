@@ -26,7 +26,6 @@ config MYL_UTILS_SERIAL
 	select SERIAL
 	select UART_INTERRUPT_DRIVEN
 	select UART_USE_RUNTIME_CONFIGURE
-	select UART_DRV_CMD
 	select RING_BUFFER
 	help
 	  This option enables the default mylonics uart settings.

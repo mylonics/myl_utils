@@ -17,6 +17,10 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/ring_buffer.h>
 
+#ifndef CONFIG_MYL_UTILS_SERIAL
+#error Enable CONFIG_MYL_UTILS_SERIAL in kconfig (prj.conf)
+#endif
+
 #define HW_BUFFER_SIZE 1024
 
 #define RX_BUFFER_SIZE 2048
@@ -53,6 +57,14 @@ class ZephyrBasicSerialDevice : public SerialPort {
     }
   }
 
+  void PutArray(uint8_t *c, size_t size) {
+    ring_buf_put(&tx_rb_, c, size);
+    if (!transmitting_) {
+      transmitting_ = true;
+      uart_irq_tx_enable(dev_);
+    }
+  }
+
   void PutC(char c, bool flush) {
     ring_buf_put(&tx_rb_, (uint8_t *)&c, 1);
     if (flush || !transmitting_ || (ring_buf_space_get(&tx_rb_) == 0)) {
@@ -77,6 +89,13 @@ class ZephyrBasicSerialDevice : public SerialPort {
       return true;
     }
     return false;
+  };
+
+  size_t GetArray(uint8_t *c, size_t max_length) {
+    size_t available_size = ring_buf_size_get(&rx_rb_);
+    size_t acquire_size = available_size > max_length ? max_length : available_size;
+    ring_buf_get(&rx_rb_, c, acquire_size);
+    return acquire_size;
   };
 
  protected:

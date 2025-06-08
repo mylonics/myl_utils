@@ -19,6 +19,18 @@ choice STD_CPP
 	default STD_CPP17
 endchoice
 
+config MYL_UTILS_SERIAL
+	bool "Enable Mylonics Uart Utilities"
+	default n
+	depends on MYL_UTILS
+	select SERIAL
+	select UART_INTERRUPT_DRIVEN
+	select UART_USE_RUNTIME_CONFIGURE
+	select UART_DRV_CMD
+	select RING_BUFFER
+	help
+	  This option enables the default mylonics uart settings.
+
 config MYL_UTILS_SPI
 	bool "Enable Mylonics SPI Utilities"
 	default n
@@ -57,8 +69,7 @@ config MYL_UTILS_USB_SERIAL
   default n
 	depends on MYL_UTILS
 	select USB_DEVICE_STACK_NEXT
-	select RING_BUFFER
-	select SERIAL
+	select MYL_UTILS_SERIAL
 	help
 	  This option enables the use of the USB serial implementation.
 

@@ -66,8 +66,8 @@ class UbxDevice {
     buffer[UBX_PACKET_SYNC2_LOC] = UBX_SYNC2;
     buffer[UBX_PACKET_CLASS_ID_LOC] = msg_id >> 8;
     buffer[UBX_PACKET_MSG_ID_LOC] = msg_id;
-    buffer[UBX_PACKET_LENGTH_LOC] = length >> 8;
-    buffer[UBX_PACKET_LENGTH_LOC + 1] = length;
+    buffer[UBX_PACKET_LENGTH_LOC] = length;
+    buffer[UBX_PACKET_LENGTH_LOC + 1] = length >> 8;
     memcpy(buffer + UBX_PACKET_PAYLOAD_LOC, data, length);
     uint16_t checksum =
         calc_checksum(buffer + UBX_PACKET_CLASS_ID_LOC, length + (UBX_PACKET_PAYLOAD_LOC - UBX_PACKET_CLASS_ID_LOC));

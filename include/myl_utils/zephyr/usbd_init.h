@@ -8,6 +8,7 @@
 
 #ifdef CONFIG_MYL_UTILS_USB_SERIAL
 
+#include <myl_utils/zephyr/log.h>
 #include <stdint.h>
 #include <zephyr/usb/usbd.h>
 
@@ -64,7 +65,7 @@ static void sample_fix_code_triple(struct usbd_context *uds_ctx, const enum usbd
 }
 
 struct usbd_context *sample_usbd_init_device(usbd_msg_cb_t msg_cb) {
-  LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+  DECLARE_MYL_UTILS_LOG()
   /* doc device instantiation start */
   /*
    * Instantiate a context named sample_usbd using the default USB device

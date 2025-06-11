@@ -1,10 +1,8 @@
 #pragma once
 
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/logging/log.h>
 
-#define INITIALIZE_MYL_UTILS_LOG() LOG_MODULE_REGISTER(myl_utils_log, CONFIG_MYL_UTILS_LOG_LEVEL);
-#define DECLARE_MYL_UTILS_LOG() LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+#include "log.h"
 
 #define DECLARE_PWM(pwm) static const struct pwm_dt_spec pwm = PWM_DT_SPEC_GET(DT_NODELABEL(pwm));
 
@@ -16,7 +14,7 @@
   if (!pwm_is_ready_dt(&pwm)) return 1;
 
 static inline bool configure_and_check_successful(const struct gpio_dt_spec *spec, gpio_flags_t extra_flags) {
-  LOG_MODULE_DECLARE(myl_utils, LOG_LEVEL_ERR);
+  DECLARE_MYL_UTILS_LOG();
 
   if (gpio_pin_configure_dt(spec, extra_flags)) {
     LOG_ERR("Failed to init gpio %s %d\n", spec->port->name, spec->pin);
@@ -41,13 +39,14 @@ static inline bool configure_and_check_successful(const struct gpio_dt_spec *spe
   static struct gpio_callback gpio##_cb_data;  \
   void gpio##_cb_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins) { handler(); }
 
-#define INIT_GPIO_INTERUPT_WITH_HANDLER(gpio, handler, edge)                                                 \
-  int gpio##_ret = gpio_pin_interrupt_configure_dt(&gpio, edge);                                             \
-  if (gpio##_ret != 0) {                                                                                     \
-    printk("Error %d: failed to configure interrupt on %s pin %d\n", gpio##_ret, gpio.port->name, gpio.pin); \
-    return 1;                                                                                                \
-  }                                                                                                          \
-  gpio_init_callback(&gpio##_cb_data, handler, BIT(gpio.pin));                                               \
+#define INIT_GPIO_INTERUPT_WITH_HANDLER(gpio, handler, edge)                                                  \
+  int gpio##_ret = gpio_pin_interrupt_configure_dt(&gpio, edge);                                              \
+  if (gpio##_ret != 0) {                                                                                      \
+    DECLARE_MYL_UTILS_LOG();                                                                                  \
+    LOG_ERR("Error %d: failed to configure interrupt on %s pin %d\n", gpio##_ret, gpio.port->name, gpio.pin); \
+    return 1;                                                                                                 \
+  }                                                                                                           \
+  gpio_init_callback(&gpio##_cb_data, handler, BIT(gpio.pin));                                                \
   gpio_add_callback(gpio.port, &gpio##_cb_data);
 
 #define INIT_GPIO_INTERUPT(gpio, edge) INIT_GPIO_INTERUPT_WITH_HANDLER(gpio, gpio##_cb_handler, edge)

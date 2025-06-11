@@ -225,7 +225,7 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
         };
 
   bool Start(bool connect_blocking = false) {
-    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+    DECLARE_MYL_UTILS_LOG();
     if (!device_is_ready(dev_)) {
       LOG_ERR("CDC ACM device not ready");
       return false;
@@ -249,7 +249,6 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
     ZephyrBasicSerialDevice *ctx = (ZephyrBasicSerialDevice *)user_data;
 
     while (uart_irq_update(dev) && uart_irq_is_pending(dev)) {
-      // LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
       if (uart_irq_rx_ready(dev)) {
         int recv_len, rb_len;
         uint8_t buffer[64];
@@ -297,7 +296,7 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
   }
 
   static int InitializeHW() {
-    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+    DECLARE_MYL_UTILS_LOG();
     int ret = 0;
     if (!hw_initialized) {
       connected = false;
@@ -327,7 +326,7 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
   }
 
   static void usb_hw_msg_cb(struct usbd_context *const ctx, const struct usbd_msg *msg) {
-    LOG_MODULE_DECLARE(myl_utils, CONFIG_MYL_UTILS_LOG_LEVEL);
+    DECLARE_MYL_UTILS_LOG();
     LOG_INF("USBD message: %s", usbd_msg_type_string(msg->type));
 
     if (usbd_can_detect_vbus(ctx)) {

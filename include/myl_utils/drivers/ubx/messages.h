@@ -4,6 +4,7 @@
 
 #define UBX_SYNC1 0xb5
 #define UBX_SYNC2 0x62
+#define RTCM_SYNC1 0xd3
 
 enum UBX_CLASS_ID {
   UBX_NAV = 0x01,
@@ -18,6 +19,7 @@ enum UBX_CLASS_ID {
   UBX_LOG = 0x21,
   UBX_SEC = 0x27,
   UBX_NAV2 = 0x29,
+  UBX_RTCM = 0xf5,
 };
 
 #define MSG_ID_DEFINE(name, class_id, msg_id)              \

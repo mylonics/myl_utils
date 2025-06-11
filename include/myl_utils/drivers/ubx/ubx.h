@@ -6,6 +6,7 @@
 #include "messages.h"
 
 enum UBX_PARSER_STATUS {
+  UBX_PARSER_SYNCING,
   UBX_PARSER_FRAMING_FAILURE,
   UBX_PARSER_MESSAGE_OVERSIZE,
   UBX_PARSER_CHECKSUM_FAILURE,
@@ -13,7 +14,7 @@ enum UBX_PARSER_STATUS {
   UBX_PARSER_UNIMPLEMENTED_CLASS_ID,
   UBX_PARSER_UNKNOWN_MESSAGE_ID,
   UBX_PARSER_UNKNOWN_CLASS_ID,
-  UBX_PARSER_PROCESSED_MSG,
+  UBX_PARSER_PROCESSED_MSG
 };
 
 enum UBX_PARSER_STATE {
@@ -23,7 +24,10 @@ enum UBX_PARSER_STATE {
   WAITING_FOR_MSG_ID,
   WAITING_FOR_LENGTH1,
   WAITING_FOR_LENGTH2,
-  WAITING_FOR_PAYLOAD_AND_CHECKSUM
+  WAITING_FOR_PAYLOAD_AND_CHECKSUM,
+  WAITING_FOR_RTCM_LENGTH1,
+  WAITING_FOR_RTCM_LENGTH2,
+  WAITING_FOR_RTCM_PAYLOAD_AND_CHECKSUM,
 };
 
 const uint8_t UBX_PACKET_SYNC1_LOC = 0;
@@ -33,14 +37,19 @@ const uint8_t UBX_PACKET_MSG_ID_LOC = 3;
 const uint8_t UBX_PACKET_LENGTH_LOC = 4;
 const uint8_t UBX_PACKET_PAYLOAD_LOC = 6;
 
+const uint8_t RTCM_PACKET_LENGTH_LOC = 1;
+const uint8_t RTCM_PACKET_NON_PAYLOAD_LENGTH = 6;
+
 const uint8_t UBX_PACKET_CHECKSUM_LENGTH = 2;
 const uint8_t UBX_PACKET_NON_PAYLOAD_LENGTH = UBX_PACKET_PAYLOAD_LOC + UBX_PACKET_CHECKSUM_LENGTH;
 const uint16_t UBX_PARSER_MAX_BUFFER_SIZE = 1024;
 
-typedef void (*ubx_nav_pvt_t)(ubx_nav_pvt nav_data);
+typedef void (*ubx_nav_pvt_cb_t)(ubx_nav_pvt nav_data);
+typedef void (*ubx_rtcm_cb_t)(uint8_t msg_type, uint8_t* data, size_t length);
 
 struct ubx_callbacks {
-  ubx_nav_pvt_t ubx_nav_pvt_cb{};
+  ubx_nav_pvt_cb_t ubx_nav_pvt_cb{};
+  ubx_rtcm_cb_t ubx_rtcm_cb{};
 };
 
 class UbxDevice {
@@ -57,6 +66,8 @@ class UbxDevice {
       }
     }
   }
+
+  void SendRawData(uint8_t* data, size_t length) { port_.PutArray(data, length); }
 
   uint16_t calc_checksum(uint8_t* data, uint16_t length) {
     uint8_t CK_A = 0, CK_B = 0;
@@ -124,34 +135,32 @@ class UbxDevice {
 
     configure_uint8(UBLOX_CFG_UART1INPROT_UBX, 1);
     configure_uint8(UBLOX_CFG_UART1INPROT_RTCM3X, 1);
-    configure_uint8(UBLOX_CFG_MSGOUT_UBX_RXM_RTCM_UART1, 1);
+    // configure_uint8(UBLOX_CFG_MSGOUT_UBX_RXM_RTCM_UART1, 1);
   }
 
-  void initialize_rtcm_output() {
+  void initialize_rtcm_output(bool minimal_rtk = true) {
     initialize_navigation();
 
-    configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1005_UART1, 2);  // Base station ARP
-    configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1074_UART1, 2);  // GPS MSM4
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1077_UART1, 2);  // GPS MSM7
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1084_UART1, 2);  // GLONASS MSM4
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1087_UART1, 2);  // GLONASS MSM7
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1094_UART1, 2);  // Galileo MSM4
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1097_UART1, 2);  // Galileo MSM7
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1124_UART1, 2);  // BeiDou MSM4
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1127_UART1, 2);  // BeiDou MSM7
-    // configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1230_UART1, 2);  // GLONASS L1 and L2 code-phase biases
+    if (minimal_rtk) {
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1005_UART1, 10);  // Base station ARP
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1074_UART1, 2);   // GPS MSM4
+    } else {
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1005_UART1, 5);  // Base station ARP
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1074_UART1, 1);  // GPS MSM4
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1077_UART1, 1);  // GPS MSM7
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1084_UART1, 1);  // GLONASS MSM4
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1087_UART1, 1);  // GLONASS MSM7
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1094_UART1, 1);  // Galileo MSM4
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1097_UART1, 1);  // Galileo MSM7
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1124_UART1, 1);  // BeiDou MSM4
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1127_UART1, 1);  // BeiDou MSM7
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1230_UART1, 1);  // GLONASS L1 and L2 code-phase biases
+    }
 
     configure_uint8(UBLOX_CFG_UART1OUTPROT_UBX, 1);
-    configure_uint8(UBLOX_CFG_UART1OUTPROT_RTCM3X, 1);
+    // configure_uint8(UBLOX_CFG_UART1OUTPROT_RTCM3X, 1);
     startSurvey(10, 20.0);
   }
-
-  // void setSurveyPoint() {
-  //   ubx_time_mode msg{};
-  //   msg.mode = (uint8_t)ubx_survey_mode::FIXED;
-  //
-  //  send_message(UBX_START_SURVEY_CLASS_ID, (uint8_t*)&msg, sizeof(ubx_time_mode));
-  //}
 
   void startSurvey(uint32_t observationTimeSeconds, double requiredAccuracyMeters) {
     configure_uint32(UBLOX_CFG_TMODE_SVIN_MIN_DUR, observationTimeSeconds);
@@ -160,9 +169,9 @@ class UbxDevice {
     configure_uint8(UBLOX_CFG_TMODE_MODE, (uint8_t)ubx_survey_mode::SURVEY_IN);
   }
 
-  enum UBX_PARSER_STATUS process_config_packet(uint8_t packet_length) { return UBX_PARSER_UNKNOWN_MESSAGE_ID; }
+  enum UBX_PARSER_STATUS process_config_packet() { return UBX_PARSER_UNKNOWN_MESSAGE_ID; }
 
-  enum UBX_PARSER_STATUS process_mon_packet(uint8_t packet_length) {
+  enum UBX_PARSER_STATUS process_mon_packet() {
     DECLARE_MYL_UTILS_LOG();
     switch (rx_buffer_[UBX_PACKET_MSG_ID_LOC]) {
       case UBX_VERSION_GET_MSG_ID:
@@ -177,15 +186,19 @@ class UbxDevice {
     return UBX_PARSER_UNKNOWN_MESSAGE_ID;
   }
 
-  void parse_nav_pvt_msg(uint8_t len) {
-    if (len < (sizeof(struct ubx_nav_pvt) + UBX_PACKET_NON_PAYLOAD_LENGTH)) {
+  enum UBX_PARSER_STATUS process_rtcm_packet() {
+    if (cbs_.ubx_rtcm_cb) {
+      cbs_.ubx_rtcm_cb(rx_buffer_[UBX_PACKET_PAYLOAD_LOC], rx_buffer_, packet_length_);
+    }
+    return UBX_PARSER_PROCESSED_MSG;
+  }
+
+  void parse_nav_pvt_msg() {
+    if (packet_length_ < (sizeof(struct ubx_nav_pvt) + UBX_PACKET_NON_PAYLOAD_LENGTH)) {
       return;
     }
     const struct ubx_nav_pvt* nav_pvt = (const struct ubx_nav_pvt*)(rx_buffer_ + UBX_PACKET_PAYLOAD_LOC);
-    // void* data1 = (void*)nav_pvt;
-    // void* data2 = (void*)rx_buffer_;
-    // void* data3 = (void*)rx_buffer_ + UBX_PACKET_PAYLOAD_LOC;
-    if (cbs_.ubx_nav_pvt_cb) {  //&& data1 && data2 && data3) {
+    if (cbs_.ubx_nav_pvt_cb) {
       cbs_.ubx_nav_pvt_cb(*nav_pvt);
     }
     // enum gnss_fix_quality fix_quality = GNSS_FIX_QUALITY_INVALID;
@@ -240,13 +253,10 @@ class UbxDevice {
     //};
   }
 
-  enum UBX_PARSER_STATUS process_nav_packet(uint8_t packet_length) {
-    DECLARE_MYL_UTILS_LOG();
-    LOG_DBG("Got Nav Msg %d\n", rx_buffer_[UBX_PACKET_MSG_ID_LOC]);
-    LOG_INF("Got INF Nav Msg %d\n", rx_buffer_[UBX_PACKET_MSG_ID_LOC]);
+  enum UBX_PARSER_STATUS process_nav_packet() {
     switch (rx_buffer_[UBX_PACKET_MSG_ID_LOC]) {
       case UBX_NAV_PVT_MSG_ID:
-        parse_nav_pvt_msg(packet_length);
+        parse_nav_pvt_msg();
         return UBX_PARSER_PROCESSED_MSG;
         break;
 
@@ -257,11 +267,11 @@ class UbxDevice {
     return UBX_PARSER_UNKNOWN_MESSAGE_ID;
   }
 
-  enum UBX_PARSER_STATUS process_full_packet(uint8_t packet_length) {
-    uint16_t calculated_checksum = calc_checksum(rx_buffer_ + 2, packet_length - 4);
+  enum UBX_PARSER_STATUS process_full_packet() {
+    uint16_t calculated_checksum = calc_checksum(rx_buffer_ + 2, packet_length_ - 4);
     DECLARE_MYL_UTILS_LOG();
     if (calculated_checksum !=
-        (((uint16_t)rx_buffer_[packet_length - 2] << 8) + (uint16_t)rx_buffer_[packet_length - 1])) {
+        (((uint16_t)rx_buffer_[packet_length_ - 2] << 8) + (uint16_t)rx_buffer_[packet_length_ - 1])) {
       LOG_ERR("Checksum Error");
       return UBX_PARSER_CHECKSUM_FAILURE;
     }
@@ -270,19 +280,19 @@ class UbxDevice {
 
     switch (rx_buffer_[UBX_PACKET_CLASS_ID_LOC]) {
       case UBX_CFG:
-        return process_config_packet(packet_length);
+        return process_config_packet();
         break;
 
       case UBX_NAV:
-        return process_nav_packet(packet_length);
+        return process_nav_packet();
         break;
       case UBX_MON:
-        return process_mon_packet(packet_length);
+        return process_mon_packet();
         break;
+      case UBX_RTCM:
       case UBX_RXM:
       case UBX_INF:
       case UBX_ACK:
-
       case UBX_UPD:
       case UBX_TIM:
       case UBX_MGA:
@@ -298,14 +308,19 @@ class UbxDevice {
   }
 
   enum UBX_PARSER_STATUS ubx_parse_byte(uint8_t byte) {
+    DECLARE_MYL_UTILS_LOG();
     switch (parser_state_) {
       case WAITING_FOR_SYNC1:
-        byte_index_ = 0;
         if (byte == UBX_SYNC1) {
-          rx_buffer_[byte_index_] = byte;
-          byte_index_++;
           parser_state_ = WAITING_FOR_SYNC2;
+        } else if (byte == RTCM_SYNC1) {
+          parser_state_ = WAITING_FOR_RTCM_LENGTH1;
+        } else {
+          return UBX_PARSER_SYNCING;
         }
+        byte_index_ = 0;
+        rx_buffer_[byte_index_] = byte;
+        byte_index_++;
         return UBX_PARSER_NO_MESSAGE;
         break;
 
@@ -356,7 +371,40 @@ class UbxDevice {
         byte_index_++;
         if (byte_index_ == packet_length_) {
           parser_state_ = WAITING_FOR_SYNC1;
-          return process_full_packet(packet_length_);
+          print_out = true;
+          marker = true;
+          return process_full_packet();
+        }
+        return UBX_PARSER_NO_MESSAGE;
+        break;
+
+      case WAITING_FOR_RTCM_LENGTH1:
+        rx_buffer_[byte_index_] = byte;
+        byte_index_++;
+        parser_state_ = WAITING_FOR_RTCM_LENGTH2;
+        return UBX_PARSER_NO_MESSAGE;
+        break;
+
+      case WAITING_FOR_RTCM_LENGTH2:
+        packet_length_ = (rx_buffer_[RTCM_PACKET_LENGTH_LOC] << 8 | byte) + RTCM_PACKET_NON_PAYLOAD_LENGTH;
+        if (packet_length_ > UBX_PARSER_MAX_BUFFER_SIZE) {
+          parser_state_ = WAITING_FOR_SYNC1;
+          return UBX_PARSER_MESSAGE_OVERSIZE;
+        }
+        rx_buffer_[byte_index_] = byte;
+        byte_index_++;
+        parser_state_ = WAITING_FOR_RTCM_PAYLOAD_AND_CHECKSUM;
+        return UBX_PARSER_NO_MESSAGE;
+        break;
+
+      case WAITING_FOR_RTCM_PAYLOAD_AND_CHECKSUM:
+        rx_buffer_[byte_index_] = byte;
+        byte_index_++;
+        if (byte_index_ == packet_length_) {
+          parser_state_ = WAITING_FOR_SYNC1;
+          print_out = true;
+          marker = true;
+          return process_rtcm_packet();
         }
         return UBX_PARSER_NO_MESSAGE;
         break;
@@ -375,4 +423,6 @@ class UbxDevice {
   enum UBX_PARSER_STATE parser_state_ = WAITING_FOR_SYNC1;
   uint8_t byte_index_ = 0;
   uint8_t packet_length_ = 0;
+  bool print_out = false;
+  bool marker = false;
 };

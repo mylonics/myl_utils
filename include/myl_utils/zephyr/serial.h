@@ -176,7 +176,7 @@ class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
         size_t size = ring_buf_put_claim(&ctx->rx_rb_, &data, HW_BUFFER_SIZE / 2);
         if (size) {
           size_t rx_size = uart_fifo_read(dev, data, size);
-          int err = ring_buf_put_finish(&ctx->rx_rb_, rx_size);
+          ring_buf_put_finish(&ctx->rx_rb_, rx_size);
 
         } else {
           // buffer overflow and we need to get rid of the data from the hw so

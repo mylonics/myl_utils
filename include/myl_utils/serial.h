@@ -74,11 +74,15 @@ class SerialPort {
 
   virtual void PutC(char c) = 0;
 
+  virtual void PutArray(uint8_t *c, size_t size) = 0;
+
   virtual bool Readable() = 0;
 
   virtual char GetC() = 0;
 
   virtual bool GetC(char &c, size_t timeout_ms) = 0;
+
+  virtual size_t GetArray(uint8_t *c, size_t max_length) = 0;
 };
 
 class SerialRepeater {

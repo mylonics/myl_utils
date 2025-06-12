@@ -140,3 +140,7 @@
     k_work_queue_init(&name##_work_q);                                                                   \
     k_work_queue_start(&name##_work_q, name##_area, K_THREAD_STACK_SIZEOF(name##_area), priority, NULL); \
   };
+
+#define CREATE_THREAD_FUNCTION(name, stack_size, priority, function) \
+  void name##_tfunction(void *, void *, void *) { function(); }      \
+  K_THREAD_DEFINE(name##_tid, stack_size, name##_tfunction, NULL, NULL, NULL, priority, 0, 0);

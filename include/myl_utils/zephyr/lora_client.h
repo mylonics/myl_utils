@@ -18,6 +18,7 @@ class LoraClient : public LoraDevice {
   }
 
   void register_onto_network() {
+    DECLARE_MYL_UTILS_LOG();
     uint8_t data[5];
     data[0] = (uint8_t)NETWORK_MSG_IDS::REGISTER;
     data[1] = mac_id_ >> 24;
@@ -30,6 +31,7 @@ class LoraClient : public LoraDevice {
   }
 
   void Runner() {
+    DECLARE_MYL_UTILS_LOG();
     while (true) {
       receive();
       if (registration_request) {
@@ -65,6 +67,7 @@ class LoraClient : public LoraDevice {
 
   void handle_message() {
     uint32_t mac_id = 0;
+    DECLARE_MYL_UTILS_LOG();
     if (rx_msg_header.msg_id == 0) {
       LOG_INF("got network message %d\n", rx_msg_header.data[0]);
       switch ((NETWORK_MSG_IDS)rx_msg_header.data[0]) {

@@ -54,7 +54,9 @@ struct ubx_callbacks {
 
 class UbxDevice {
  public:
-  UbxDevice(SerialPort& port, ubx_callbacks cbs) : port_(port), cbs_{cbs} {}
+  UbxDevice(SerialPort& port, ubx_callbacks cbs) : port_(port), cbs_{cbs} {
+    port_.ReconfigureUart(UartBaud::B_38400, UartParity::NONE, UartStopBits::ONE);
+  }
 
   void Runner() {
     if (port_.Readable()) {

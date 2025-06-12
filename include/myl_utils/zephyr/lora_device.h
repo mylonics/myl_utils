@@ -1,6 +1,7 @@
 #pragma once
 
 #include <errno.h>
+#include <myl_utils/zephyr/log.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/lora.h>
 #include <zephyr/kernel.h>
@@ -8,15 +9,11 @@
 
 #include "stdint.h"
 
-#define DEFAULT_RADIO_NODE DT_ALIAS(lora0)
-BUILD_ASSERT(DT_NODE_HAS_STATUS_OKAY(DEFAULT_RADIO_NODE), "No default LoRa radio specified in DT");
+#ifndef CONFIG_LORA
+#error Enable CONFIG_MYL_UTILS_LORA in kconfig (prj.conf)
+#endif
 
-#define MAX_DATA_LEN 255
 #define MAX_DATA_LENGTH 200
-
-#define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(lora_transceive);
 
 struct network_header {
   uint8_t network;
@@ -40,6 +37,7 @@ class LoraDevice {
   enum class NETWORK_MSG_IDS : uint8_t { BROADCAST, REGISTER, REGISTER_REPLY, NODE_REQUEST, NODE_REPLY };
   LoraDevice(const struct device *const lora_dev, uint8_t net_id, lora_msg_cb msg_cb, bool isServer)
       : lora_dev_{lora_dev}, net_id_{net_id}, msg_cb_{msg_cb}, isServer_{isServer} {
+    DECLARE_MYL_UTILS_LOG();
     if (!device_is_ready(lora_dev)) {
       LOG_ERR("%s Device not ready", lora_dev->name);
       return;
@@ -72,6 +70,7 @@ class LoraDevice {
   bool registered_{};
 
   bool transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
+    DECLARE_MYL_UTILS_LOG();
     if (msg_id && !registered_) {
       LOG_INF("Can't transmit non-network messages before registration");
       return false;
@@ -128,6 +127,7 @@ class LoraDevice {
     int16_t rssi;
     int8_t snr;
     uint8_t *data = raw_rx_buffer;
+    DECLARE_MYL_UTILS_LOG();
     LOG_INF("Starting Receive");
     ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi, &snr);
     if (ret < 0) {
@@ -210,6 +210,7 @@ class LoraDevice {
   virtual void handle_message() = 0;
 
   bool enable_tx() {
+    DECLARE_MYL_UTILS_LOG();
     config.tx = true;
     int ret = lora_config(lora_dev_, &config);
     if (ret < 0) {
@@ -220,6 +221,7 @@ class LoraDevice {
   }
 
   bool enable_rx() {
+    DECLARE_MYL_UTILS_LOG();
     config.tx = false;
     int ret = lora_config(lora_dev_, &config);
     if (ret < 0) {

@@ -244,6 +244,8 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
     return true;
   }
 
+  void ReconfigureUart(UartBaud baudrate, UartParity parity, UartStopBits stop_bits) {}
+
  private:
   static void UartIntHandler(const struct device *dev, void *user_data) {
     ZephyrBasicSerialDevice *ctx = (ZephyrBasicSerialDevice *)user_data;

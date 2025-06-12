@@ -72,6 +72,8 @@ class SerialPort {
  public:
   virtual bool Start() = 0;
 
+  virtual void ReconfigureUart(UartBaud baudrate, UartParity parity, UartStopBits stop_bits) = 0;
+
   virtual void PutC(char c) = 0;
 
   virtual void PutArray(uint8_t *c, size_t size) = 0;

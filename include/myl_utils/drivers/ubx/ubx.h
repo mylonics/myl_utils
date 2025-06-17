@@ -39,6 +39,7 @@ const uint8_t UBX_PACKET_PAYLOAD_LOC = 6;
 
 const uint8_t RTCM_PACKET_LENGTH_LOC = 1;
 const uint8_t RTCM_PACKET_NON_PAYLOAD_LENGTH = 6;
+const uint8_t RTCM_PACKET_PAYLOAD_ID_LOC = 3;
 
 const uint8_t UBX_PACKET_CHECKSUM_LENGTH = 2;
 const uint8_t UBX_PACKET_NON_PAYLOAD_LENGTH = UBX_PACKET_PAYLOAD_LOC + UBX_PACKET_CHECKSUM_LENGTH;
@@ -137,7 +138,10 @@ class UbxDevice {
 
     configure_uint8(UBLOX_CFG_UART1INPROT_UBX, 1);
     configure_uint8(UBLOX_CFG_UART1INPROT_RTCM3X, 1);
-    // configure_uint8(UBLOX_CFG_MSGOUT_UBX_RXM_RTCM_UART1, 1);
+    configure_uint8(UBLOX_CFG_MSGOUT_UBX_RXM_RTCM_UART1, 1);
+    configure_uint8(UBLOX_CFG_MSGOUT_UBX_RXM_COR_UART1, 1);
+
+    configure_uint8(UBLOX_CFG_TMODE_MODE, (uint8_t)ubx_survey_mode::DISABLED);
   }
 
   void initialize_rtcm_output(bool minimal_rtk = true) {
@@ -145,7 +149,7 @@ class UbxDevice {
 
     if (minimal_rtk) {
       configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1005_UART1, 10);  // Base station ARP
-      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1074_UART1, 2);   // GPS MSM4
+      configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1074_UART1, 1);   // GPS MSM4
     } else {
       configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1005_UART1, 5);  // Base station ARP
       configure_uint8(UBLOX_CFG_MSGOUT_RTCM_3X_TYPE1074_UART1, 1);  // GPS MSM4
@@ -188,9 +192,28 @@ class UbxDevice {
     return UBX_PARSER_UNKNOWN_MESSAGE_ID;
   }
 
+  enum UBX_PARSER_STATUS process_rxm_packet() {
+    DECLARE_MYL_UTILS_LOG();
+    switch (rx_buffer_[UBX_PACKET_MSG_ID_LOC]) {
+      case UBX_RXM_COR_MSG_ID:
+        LOG_INF("GOT rxm messgae");
+        /* code */
+        break;
+      case UBX_RXM_RTCM_MSG_ID:
+        LOG_INF("GOT rtcm messgae");
+        /* code */
+        break;
+
+      default:
+        break;
+    }
+
+    return UBX_PARSER_UNKNOWN_MESSAGE_ID;
+  }
+
   enum UBX_PARSER_STATUS process_rtcm_packet() {
     if (cbs_.ubx_rtcm_cb) {
-      cbs_.ubx_rtcm_cb(rx_buffer_[UBX_PACKET_PAYLOAD_LOC], rx_buffer_, packet_length_);
+      cbs_.ubx_rtcm_cb(rx_buffer_[RTCM_PACKET_PAYLOAD_ID_LOC], rx_buffer_, packet_length_);
     }
     return UBX_PARSER_PROCESSED_MSG;
   }
@@ -278,8 +301,6 @@ class UbxDevice {
       return UBX_PARSER_CHECKSUM_FAILURE;
     }
 
-    LOG_DBG("Got Msg %d %d\n", rx_buffer_[UBX_PACKET_CLASS_ID_LOC], rx_buffer_[UBX_PACKET_MSG_ID_LOC]);
-
     switch (rx_buffer_[UBX_PACKET_CLASS_ID_LOC]) {
       case UBX_CFG:
         return process_config_packet();
@@ -291,8 +312,10 @@ class UbxDevice {
       case UBX_MON:
         return process_mon_packet();
         break;
-      case UBX_RTCM:
       case UBX_RXM:
+        return process_rxm_packet();
+        break;
+      case UBX_RTCM:
       case UBX_INF:
       case UBX_ACK:
       case UBX_UPD:
@@ -301,11 +324,14 @@ class UbxDevice {
       case UBX_LOG:
       case UBX_SEC:
       case UBX_NAV2:
+        LOG_WRN("Got Msg %d %d\n", rx_buffer_[UBX_PACKET_CLASS_ID_LOC], rx_buffer_[UBX_PACKET_MSG_ID_LOC]);
         return UBX_PARSER_UNIMPLEMENTED_CLASS_ID;
 
       default:
         break;
     }
+    LOG_WRN("Got Msg %d %d\n", rx_buffer_[UBX_PACKET_CLASS_ID_LOC], rx_buffer_[UBX_PACKET_MSG_ID_LOC]);
+
     return UBX_PARSER_UNKNOWN_CLASS_ID;
   }
 

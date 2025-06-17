@@ -44,7 +44,7 @@ class LoraClient : public LoraDevice {
           reply_request = false;
         } else {
           uint8_t data = (uint8_t)NETWORK_MSG_IDS::NODE_REPLY;
-          LOG_INF("Sending NODE reply");
+          LOG_DBG("Sending NODE reply");
           transmit(0, 0, &data, 1);
           reply_request = false;
         }
@@ -69,7 +69,7 @@ class LoraClient : public LoraDevice {
     uint32_t mac_id = 0;
     DECLARE_MYL_UTILS_LOG();
     if (rx_msg_header.msg_id == 0) {
-      LOG_INF("got network message %d\n", rx_msg_header.data[0]);
+      LOG_DBG("got network message %d\n", rx_msg_header.data[0]);
       switch ((NETWORK_MSG_IDS)rx_msg_header.data[0]) {
         case NETWORK_MSG_IDS::BROADCAST:
           if (!registered_) {
@@ -90,6 +90,7 @@ class LoraClient : public LoraDevice {
           if (mac_id == mac_id_) {
             node_id_ = rx_msg_header.data[1];
             registered_ = true;
+            LOG_INF("Registered onto network as %d\n", node_id_);
           }
           break;
 

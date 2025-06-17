@@ -30,6 +30,9 @@ MSG_ID_DEFINE(UBX_NAV_PVT, UBX_NAV, 0x7);
 MSG_ID_DEFINE(UBX_VERSION_GET, UBX_MON, 0x4);
 MSG_ID_DEFINE(UBX_START_SURVEY, UBX_CFG, 0x71);
 
+MSG_ID_DEFINE(UBX_RXM_COR, UBX_RXM, 0x34);
+MSG_ID_DEFINE(UBX_RXM_RTCM, UBX_RXM, 0x32);
+
 enum class UBX_CONFIG_MSG_ID : uint16_t {
   UBX_CFG_ANT = UBX_CFG << 8 | 0x13,       // Antenna Control Settings. Used to configure the antenna control settings
   UBX_CFG_BATCH = UBX_CFG << 8 | 0x93,     // Get/set data batching configuration.
@@ -141,6 +144,7 @@ enum ubx_keys_msg_out {
   UBLOX_CFG_UART1OUTPROT_RTCM3X = 0x10740004,  // Flag to indicate if RTCM3X should be an output protocol on UART1
 
   UBLOX_CFG_MSGOUT_UBX_RXM_RTCM_UART1 = 0x20910269,
+  UBLOX_CFG_MSGOUT_UBX_RXM_COR_UART1 = 0x209106b7,
   // UBX_FRAME_DEFINE(enable_ubx_rtcm_rsp, UBX_FRAME_CFG_VAL_SET_U8_INITIALIZER(UBX_KEY_MSG_OUT_UBX_RXM_RTCM_UART1, 1));
   //  UBX_FRAME_DEFINE(set_rtk_fix_mode, UBX_FRAME_CFG_VAL_SET_U8_INITIALIZER(UBX_KEY_NAV_HP_CFG_GNSS_MODE,
   //  UBX_NAV_HP_DGNSS_MODE_RTK_FIXED));

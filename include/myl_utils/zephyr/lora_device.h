@@ -28,7 +28,7 @@ struct message_header {
   uint8_t checksum_passed;
 };
 
-#define MESSAGE_TIME_MS 500
+#define MESSAGE_TIME_MS 100
 
 typedef void (*lora_msg_cb)(const struct network_header, const struct message_header);
 
@@ -128,9 +128,12 @@ class LoraDevice {
     int8_t snr;
     uint8_t *data = raw_rx_buffer;
     DECLARE_MYL_UTILS_LOG();
-    LOG_INF("Starting Receive");
+    LOG_DBG("Starting Receive");
     ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi, &snr);
     if (ret < 0) {
+      if (ret == -11) {
+        return;
+      }
       LOG_INF("RX Error %d", ret);
       for (int i = 0; i < 100; i++) {
         raw_rx_buffer[i] = 0;

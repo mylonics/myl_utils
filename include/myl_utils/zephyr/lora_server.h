@@ -27,15 +27,18 @@ class LoraServer : public LoraDevice {
   }
 
   void Runner() {
+    int broadcast_request_count = 0;
     while (true) {
       k_mutex_lock(&my_mutex, K_FOREVER);
       register_clients();
       for (size_t i = 0; i < registered_client_length; i++) {
         send_node_request_packet(clients[i].node_id);
-        receive();
       }
-      send_node_request_packet(0);
-      receive();
+      broadcast_request_count++;
+      if (broadcast_request_count >= 1) {
+        send_node_request_packet(0);
+        broadcast_request_count = 0;
+      }
       k_mutex_unlock(&my_mutex);
       k_sleep(K_MSEC(1));
     }
@@ -102,8 +105,9 @@ class LoraServer : public LoraDevice {
       clients[node_id - 1].missed_replies++;
     }
     DECLARE_MYL_UTILS_LOG();
-    LOG_INF("Sending Node Request %d ", node_id);
+    LOG_DBG("Sending Node Request %d ", node_id);
     transmit(node_id, 0, &net_msg_id, 1);
+    receive();
   }
 
   void handle_message() {
@@ -116,14 +120,14 @@ class LoraServer : public LoraDevice {
           add_client_to_registration_list(client_mac_);
           break;
         case NETWORK_MSG_IDS::NODE_REPLY:
-          LOG_INF("Node %d is replying", rx_net_header.src);
+          LOG_DBG("Node %d is replying", rx_net_header.src);
           clients[rx_net_header.src - 1].missed_replies = 0;
           break;
         default:
           break;
       }
 
-      LOG_INF("got network message\n");
+      LOG_DBG("got network message\n");
     } else {
       LOG_INF("Node %d sent msg %d ", rx_net_header.src, rx_msg_header.msg_id);
       // log in that client is still active or not

@@ -21,7 +21,7 @@ class LoraServer : public LoraDevice {
     k_mutex_lock(&my_mutex, K_FOREVER);
     DECLARE_MYL_UTILS_LOG();
     LOG_INF("Sending Msg %d to dest %d", msg_id, dest_id);
-    bool ret = transmit(dest_id, msg_id, msg_data, msg_length);
+    bool ret = Transmit(dest_id, msg_id, msg_data, msg_length);
     k_mutex_unlock(&my_mutex);
     return ret;
   }
@@ -30,13 +30,13 @@ class LoraServer : public LoraDevice {
     int broadcast_request_count = 0;
     while (true) {
       k_mutex_lock(&my_mutex, K_FOREVER);
-      register_clients();
+      RegisterClients();
       for (size_t i = 0; i < registered_client_length; i++) {
-        send_node_request_packet(clients[i].node_id);
+        SendNodeRequestPacket(clients[i].node_id);
       }
       broadcast_request_count++;
       if (broadcast_request_count >= 1) {
-        send_node_request_packet(0);
+        SendNodeRequestPacket(0);
         broadcast_request_count = 0;
       }
       k_mutex_unlock(&my_mutex);
@@ -53,7 +53,7 @@ class LoraServer : public LoraDevice {
   struct k_mutex my_mutex;
   uint32_t client_mac_{};
 
-  void add_client_to_registration_list(uint32_t client_mac) {
+  void AddClientToRegistrationList(uint32_t client_mac) {
     DECLARE_MYL_UTILS_LOG();
     bool already_registered = false;
     uint8_t client_node_id = 0;
@@ -79,7 +79,7 @@ class LoraServer : public LoraDevice {
     clients[client_node_id - 1].missed_replies = 10;
   }
 
-  void register_clients() {
+  void RegisterClients() {
     for (size_t i = 0; i < registered_client_length; i++) {
       if (clients[i].missed_replies >= 10) {
         clients[i].missed_replies = 0;
@@ -93,12 +93,12 @@ class LoraServer : public LoraDevice {
         data[5] = clients[i].mac_id;
         DECLARE_MYL_UTILS_LOG();
         LOG_INF("Sending Registration to node %d mac %d", clients[i].node_id, clients[i].mac_id);
-        transmit(0, 0, data, 6);
+        Transmit(0, 0, data, 6);
       }
     }
   }
 
-  void send_node_request_packet(uint8_t node_id) {
+  void SendNodeRequestPacket(uint8_t node_id) {
     uint8_t net_msg_id = (uint8_t)NETWORK_MSG_IDS::BROADCAST;
     if (node_id) {
       net_msg_id = (uint8_t)NETWORK_MSG_IDS::NODE_REQUEST;
@@ -106,18 +106,18 @@ class LoraServer : public LoraDevice {
     }
     DECLARE_MYL_UTILS_LOG();
     LOG_DBG("Sending Node Request %d ", node_id);
-    transmit(node_id, 0, &net_msg_id, 1);
-    receive();
+    Transmit(node_id, 0, &net_msg_id, 1);
+    Receive();
   }
 
-  void handle_message() {
+  void HandleMessage() {
     DECLARE_MYL_UTILS_LOG();
     if (!rx_msg_header.msg_id) {
       switch ((NETWORK_MSG_IDS)rx_msg_header.data[0]) {
         case NETWORK_MSG_IDS::REGISTER:
           client_mac_ = rx_msg_header.data[1] << 24 | rx_msg_header.data[2] << 16 | rx_msg_header.data[3] << 8 |
                         rx_msg_header.data[4];
-          add_client_to_registration_list(client_mac_);
+          AddClientToRegistrationList(client_mac_);
           break;
         case NETWORK_MSG_IDS::NODE_REPLY:
           LOG_DBG("Node %d is replying", rx_net_header.src);

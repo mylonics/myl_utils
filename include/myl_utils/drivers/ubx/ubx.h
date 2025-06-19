@@ -62,13 +62,29 @@ class UbxDevice {
   void Runner() {
     if (port_.Readable()) {
       auto status = ubx_parse_byte(port_.GetC());
-      // printing_hello_world55();
-      DECLARE_MYL_UTILS_LOG();
       if (status <= UBX_PARSER_CHECKSUM_FAILURE) {
+        DECLARE_MYL_UTILS_LOG();
         LOG_ERR("Parsing Error %d \n", status);
       }
     }
   }
+
+  void PortForwardRunner(SerialPort& fwd_port) {
+    static uint8_t test_buffer[4096];
+    while (fwd_port.Readable()) {
+      size_t length = fwd_port.GetArray(test_buffer, 4096);
+      port_.PutArray(test_buffer, length);
+    }
+    while (port_.Readable()) {
+      uint8_t byte = port_.GetC();
+      fwd_port.PutC(byte);
+      auto status = ubx_parse_byte(byte);
+      if (status <= UBX_PARSER_CHECKSUM_FAILURE) {
+        DECLARE_MYL_UTILS_LOG();
+        LOG_ERR("Parsing Error %d \n", status);
+      }
+    }
+  };
 
   void SendRawData(uint8_t* data, size_t length) { port_.PutArray(data, length); }
 
@@ -226,56 +242,9 @@ class UbxDevice {
     if (cbs_.ubx_nav_pvt_cb) {
       cbs_.ubx_nav_pvt_cb(*nav_pvt);
     }
-    // enum gnss_fix_quality fix_quality = GNSS_FIX_QUALITY_INVALID;
-    // enum gnss_fix_status fix_status = GNSS_FIX_STATUS_NO_FIX;
-    //
-    // if ((nav_pvt->flags & UBX_NAV_PVT_FLAGS_GNSS_FIX_OK) && !(nav_pvt->nav.flags3 & UBX_NAV_PVT_FLAGS3_INVALID_LLH))
-    // {
-    //  switch (nav_pvt->fix_type) {
-    //    case UBX_NAV_FIX_TYPE_DR:
-    //    case UBX_NAV_FIX_TYPE_GNSS_DR_COMBINED:
-    //      fix_quality = GNSS_FIX_QUALITY_ESTIMATED;
-    //      fix_status = GNSS_FIX_STATUS_ESTIMATED_FIX;
-    //      break;
-    //    case UBX_NAV_FIX_TYPE_2D:
-    //    case UBX_NAV_FIX_TYPE_3D:
-    //      fix_quality = GNSS_FIX_QUALITY_GNSS_SPS;
-    //      fix_status = GNSS_FIX_STATUS_GNSS_FIX;
-    //      break;
-    //    default:
-    //      break;
-    //  }
-    //}
-    //
-    // struct gnss_data gnss_data = {
-    //    .info =
-    //        {
-    //            .satellites_cnt = nav_pvt->nav.num_sv,
-    //            .hdop = nav_pvt->nav.pdop * 10,
-    //            .geoid_separation = (nav_pvt->nav.height - nav_pvt->nav.hmsl),
-    //            .fix_status = fix_status,
-    //            .fix_quality = fix_quality,
-    //        },
-    //    .nav_data =
-    //        {
-    //            .latitude = (int64_t)nav_pvt->nav.latitude * 100,
-    //            .longitude = (int64_t)nav_pvt->nav.longitude * 100,
-    //            .bearing = (((nav_pvt->nav.head_motion < 0) ? (nav_pvt->nav.head_motion + (360 * 100000))
-    //                                                        : (nav_pvt->nav.head_motion)) /
-    //                        100),
-    //            .speed = nav_pvt->nav.ground_speed,
-    //            .altitude = nav_pvt->nav.hmsl,
-    //        },
-    //    .utc =
-    //        {
-    //            .hour = nav_pvt->time.hour,
-    //            .minute = nav_pvt->time.minute,
-    //            .millisecond = (nav_pvt->time.second * 1000) + (nav_pvt->time.nano / 1000000),
-    //            .month_day = nav_pvt->time.day,
-    //            .month = nav_pvt->time.month,
-    //            .century_year = (nav_pvt->time.year % 100),
-    //        },
-    //};
+
+    // hdop = nav_pvt->nav.pdop * 10,
+    // geoid_separation = (nav_pvt->nav.height - nav_pvt->nav.hmsl),
   }
 
   enum UBX_PARSER_STATUS process_nav_packet() {

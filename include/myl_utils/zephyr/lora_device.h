@@ -28,6 +28,11 @@ struct message_header {
   uint8_t checksum_passed;
 };
 
+struct lora_id {
+  uint32_t mac_id;
+  uint8_t node_id;
+};
+
 #define MESSAGE_TIME_MS 100
 
 typedef void (*lora_msg_cb)(const struct network_header, const struct message_header);
@@ -63,13 +68,15 @@ class LoraDevice {
     }
   }
 
+  lora_id GetLoraId() { return {.mac_id = mac_id_, .node_id = node_id_}; }
+
  protected:
   network_header rx_net_header;
   message_header rx_msg_header;
   uint8_t node_id_{};
   bool registered_{};
 
-  bool transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
+  bool Transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
     DECLARE_MYL_UTILS_LOG();
     if (msg_id && !registered_) {
       LOG_INF("Can't transmit non-network messages before registration");
@@ -81,11 +88,11 @@ class LoraDevice {
     output_buffer[2] = dest_id;
     output_buffer[3] = msg_id;
 
-    uint16_t checksum = fletcher_checksum_calculation(msg_data, msg_length);
+    uint16_t checksum = FletcherChecksumCalculation(msg_data, msg_length);
 
     uint8_t total_parts = (msg_length / MAX_DATA_LENGTH) + 1;
     if (!isServer_) {
-      enable_tx();
+      EnableTx();
     }
     for (int i = 0; i < total_parts; i++) {
       output_buffer[4] = (i + 1) << 4 | total_parts;
@@ -105,21 +112,21 @@ class LoraDevice {
       if (ret < 0) {
         LOG_ERR("LoRa Send failed %d msg id %d first byte %d", ret, msg_id, msg_data[0]);
         if (!isServer_) {
-          enable_rx();
+          EnableRx();
         }
         return false;
       }
     }
     if (!isServer_) {
-      enable_rx();
+      EnableRx();
     }
     return true;
   };
 
-  void receive() {
+  void Receive() {
     int ret;
     if (isServer_) {
-      if (!enable_rx()) {
+      if (!EnableRx()) {
         return;
       }
     }
@@ -142,7 +149,7 @@ class LoraDevice {
     }
 
     if (isServer_) {
-      if (!enable_tx()) {
+      if (!EnableTx()) {
         return;
       }
     }
@@ -177,14 +184,14 @@ class LoraDevice {
     if (current_part == total_parts) {
       multipart = false;
       rx_msg_header.data = input_buffer;
-      uint16_t checksum = fletcher_checksum_calculation(input_buffer, rx_msg_header.length);
+      uint16_t checksum = FletcherChecksumCalculation(input_buffer, rx_msg_header.length);
       if ((input_buffer[rx_msg_header.length] | input_buffer[rx_msg_header.length + 1] << 8) == checksum) {
         rx_msg_header.checksum_passed = true;
       } else {
         rx_msg_header.checksum_passed = false;
       }
 
-      handle_message();
+      HandleMessage();
       if (registered_ && rx_msg_header.msg_id) {
         msg_cb_(rx_net_header, rx_msg_header);
       }
@@ -210,9 +217,9 @@ class LoraDevice {
 
   struct lora_modem_config config;
 
-  virtual void handle_message() = 0;
+  virtual void HandleMessage() = 0;
 
-  bool enable_tx() {
+  bool EnableTx() {
     DECLARE_MYL_UTILS_LOG();
     config.tx = true;
     int ret = lora_config(lora_dev_, &config);
@@ -223,7 +230,7 @@ class LoraDevice {
     return true;
   }
 
-  bool enable_rx() {
+  bool EnableRx() {
     DECLARE_MYL_UTILS_LOG();
     config.tx = false;
     int ret = lora_config(lora_dev_, &config);
@@ -234,7 +241,7 @@ class LoraDevice {
     return true;
   }
 
-  static uint16_t fletcher_checksum_calculation(uint8_t *buffer, uint8_t data_length) {
+  static uint16_t FletcherChecksumCalculation(uint8_t *buffer, uint8_t data_length) {
     uint8_t byte1{};
     uint8_t byte2{};
 

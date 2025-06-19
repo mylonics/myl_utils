@@ -7,7 +7,7 @@ class LoraClient : public LoraDevice {
   LoraClient(const struct device *const lora_dev, uint8_t net_id, uint32_t mac_id, lora_msg_cb msg_cb)
       : LoraDevice{lora_dev, net_id, msg_cb, false}, mac_id_{mac_id} {};
 
-  void queue_message(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint16_t msg_length) {
+  void QueueMessage(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint16_t msg_length) {
     if (msg_length < max_queue_msg_size_) {
       queued_msg_header_.msg_id = msg_id;
       queued_msg_header_.length = msg_length;
@@ -17,35 +17,22 @@ class LoraClient : public LoraDevice {
     }
   }
 
-  void register_onto_network() {
-    DECLARE_MYL_UTILS_LOG();
-    uint8_t data[5];
-    data[0] = (uint8_t)NETWORK_MSG_IDS::REGISTER;
-    data[1] = mac_id_ >> 24;
-    data[2] = mac_id_ >> 16;
-    data[3] = mac_id_ >> 8;
-    data[4] = mac_id_;
-
-    LOG_INF("Sending Registration request");
-    transmit(0, 0, data, 5);
-  }
-
   void Runner() {
     DECLARE_MYL_UTILS_LOG();
     while (true) {
-      receive();
+      Receive();
       if (registration_request) {
-        register_onto_network();
+        RegisterOntoNetwork();
         registration_request = false;
       } else if (reply_request) {
         if (msg_queued_) {
-          transmit(queued_destination_, queued_msg_header_.msg_id, queued_buffer_, queued_msg_header_.length);
+          Transmit(queued_destination_, queued_msg_header_.msg_id, queued_buffer_, queued_msg_header_.length);
           msg_queued_ = false;
           reply_request = false;
         } else {
           uint8_t data = (uint8_t)NETWORK_MSG_IDS::NODE_REPLY;
           LOG_DBG("Sending NODE reply");
-          transmit(0, 0, &data, 1);
+          Transmit(0, 0, &data, 1);
           reply_request = false;
         }
       }
@@ -65,7 +52,7 @@ class LoraClient : public LoraDevice {
   bool registration_request{};
   bool reply_request{};
 
-  void handle_message() {
+  void HandleMessage() {
     uint32_t mac_id = 0;
     DECLARE_MYL_UTILS_LOG();
     if (rx_msg_header.msg_id == 0) {
@@ -108,5 +95,18 @@ class LoraClient : public LoraDevice {
           break;
       }
     }
+  }
+
+  void RegisterOntoNetwork() {
+    DECLARE_MYL_UTILS_LOG();
+    uint8_t data[5];
+    data[0] = (uint8_t)NETWORK_MSG_IDS::REGISTER;
+    data[1] = mac_id_ >> 24;
+    data[2] = mac_id_ >> 16;
+    data[3] = mac_id_ >> 8;
+    data[4] = mac_id_;
+
+    LOG_INF("Sending Registration request");
+    Transmit(0, 0, data, 5);
   }
 };

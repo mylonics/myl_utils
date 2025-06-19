@@ -176,6 +176,15 @@ enum ubx_keys_msg_out {
 //     ("CFG_MSGOUT_RTCM_3X_TYPE1124_USB", 1), ("CFG_MSGOUT_RTCM_3X_TYPE1127_USB", 1),
 //     ("CFG_MSGOUT_RTCM_3X_TYPE1230_USB", 1),
 
+enum class ubx_pvt_fix_mode : uint8_t {
+  FIX_NONE = 0,
+  FIX_DR = 1,
+  FIX_2D_ONLY = 2,
+  FIX_3D_ONLY = 3,
+  FIX_3D_DR = 4,
+  FIX_TME = 5,
+};
+
 struct ubx_nav_pvt {
   struct {
     uint32_t itow;
@@ -189,7 +198,7 @@ struct ubx_nav_pvt {
     uint32_t tacc;
     int32_t nano;
   } __packed time;
-  uint8_t fix_type; /** See ubx_nav_fix_type */
+  ubx_pvt_fix_mode fix_type; /** See ubx_nav_fix_type */
   uint8_t flags;
   uint8_t flags2;
   struct {

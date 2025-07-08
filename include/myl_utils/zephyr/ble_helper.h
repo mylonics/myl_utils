@@ -46,10 +46,14 @@
                          BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT, read_callback, write_callback, NULL), \
       BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
 
-#define BLE_DEFAULT_AD_SD()                                                                                  \
-  static const struct bt_data ad[] = {BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR))}; \
-  static const struct bt_data sd[] = {                                                                       \
-      BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),              \
+#define BLE_DEFAULT_AD_SD()                                                                     \
+  static uint8_t mfg_data[10] = {};                                                             \
+  static const struct bt_data ad[] = {                                                          \
+      BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),                     \
+      BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, sizeof(mfg_data)),                           \
+  };                                                                                            \
+  static const struct bt_data sd[] = {                                                          \
+      BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1), \
   };
 
 #define BT_LE_ADV_CONN_ACCEPT_LIST                                                           \

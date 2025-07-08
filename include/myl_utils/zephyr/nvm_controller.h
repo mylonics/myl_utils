@@ -6,6 +6,10 @@
 
 #include "myl_utils/nvm_interface.h"
 
+#ifndef CONFIG_MYL_UTILS_NVM
+#error Enable CONFIG_MYL_UTILS_NVM in kconfig (prj.conf)
+#endif
+
 #define NVS_PARTITION storage_partition
 #define NVS_PARTITION_DEVICE FIXED_PARTITION_DEVICE(NVS_PARTITION)
 #define NVS_PARTITION_OFFSET FIXED_PARTITION_OFFSET(NVS_PARTITION)
@@ -42,24 +46,26 @@ class NvmController : public NvmInterface {
     }
   }
 
-  bool GetData(uint16_t key, uint16_t &data) {
+  template <class data_type>
+  bool GetData(uint16_t key, data_type &data) {
     int rc = nvs_read(&fs, key, &data, sizeof(data));
     return rc == sizeof(data);
   }
 
-  bool SetData(uint16_t key, uint16_t data) {
+  template <class data_type>
+  bool SetData(uint16_t key, data_type data) {
     int rc = nvs_write(&fs, key, &data, sizeof(data));
     return rc >= 0;
   }
 
-  bool GetData(uint32_t address, uint8_t *data, size_t length) {
-    int rc = nvs_read(&fs, address, &data, length);
-    return rc == (int)length;
+  int GetData(uint16_t key, uint8_t *data, size_t length) {
+    int rc = nvs_read(&fs, key, data, length);
+    return rc;
   }
 
-  bool SetData(uint32_t address, uint8_t *data, size_t length) {
-    int rc = nvs_write(&fs, address, &data, length);
-    return rc >= 0;
+  int SetData(uint16_t key, const uint8_t *data, size_t length) {
+    int rc = nvs_write(&fs, key, data, length);
+    return rc;
   }
 
  private:

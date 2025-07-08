@@ -5,7 +5,9 @@
 class LoraClient : public LoraDevice {
  public:
   LoraClient(const struct device *const lora_dev, uint8_t net_id, uint32_t mac_id, lora_msg_cb msg_cb)
-      : LoraDevice{lora_dev, net_id, msg_cb, false}, mac_id_{mac_id} {};
+      : LoraDevice{lora_dev, net_id, msg_cb, false} {
+    mac_id_ = mac_id;
+  };
 
   void QueueMessage(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint16_t msg_length) {
     if (msg_length < max_queue_msg_size_) {
@@ -40,7 +42,6 @@ class LoraClient : public LoraDevice {
   }
 
  private:
-  uint32_t mac_id_;
   uint64_t last_sync_time_;
 
   static const size_t max_queue_msg_size_ = 1024;

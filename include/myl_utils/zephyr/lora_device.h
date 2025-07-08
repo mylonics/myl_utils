@@ -74,6 +74,7 @@ class LoraDevice {
   network_header rx_net_header;
   message_header rx_msg_header;
   uint8_t node_id_{};
+  uint32_t mac_id_{};
   bool registered_{};
 
   bool Transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
@@ -201,7 +202,6 @@ class LoraDevice {
  private:
   const struct device *lora_dev_;
   uint8_t net_id_;
-  uint8_t mac_id_;
   lora_msg_cb msg_cb_;
   bool isServer_{};
   size_t rx_message_time{MESSAGE_TIME_MS};

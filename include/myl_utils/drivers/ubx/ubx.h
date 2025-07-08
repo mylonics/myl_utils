@@ -181,7 +181,7 @@ class UbxDevice {
 
     configure_uint8(UBLOX_CFG_UART1OUTPROT_UBX, 1);
     // configure_uint8(UBLOX_CFG_UART1OUTPROT_RTCM3X, 1);
-    startSurvey(10, 20.0);
+    startSurvey(60, 1.0);
   }
 
   void startSurvey(uint32_t observationTimeSeconds, double requiredAccuracyMeters) {

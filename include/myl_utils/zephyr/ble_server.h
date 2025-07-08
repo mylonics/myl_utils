@@ -23,6 +23,7 @@ BLE_DEFAULT_AD_SD()
 
 static struct k_work adv_work;
 static struct k_work pairing_work;
+static bt_addr_le_t paired_addr;
 
 static bool isPairingMode(bool set = false, bool value = false) {
   static bool pairing_mode = false;
@@ -58,6 +59,7 @@ static void setup_accept_list_cb(const struct bt_bond_info *info, void *user_dat
   int err = bt_le_filter_accept_list_add(&info->addr);
   DECLARE_MYL_UTILS_LOG();
   LOG_INF("Added following peer to whitelist: %x %x \n", info->addr.a.val[0], info->addr.a.val[1]);
+  bt_addr_le_copy(&paired_addr, &info->addr);
   if (err) {
     LOG_INF("Cannot add peer to Filter Accept List (err: %d)\n", err);
     (*bond_cnt) = -EIO;
@@ -82,7 +84,9 @@ static int setup_accept_list(uint8_t local_id) {
 static void adv_work_handler(struct k_work *work) {
   DECLARE_MYL_UTILS_LOG();
   int err = 0;
+  mfg_data[0] = 1;
   if (isPairingMode()) {
+    LOG_INF("Advertising in Pairing Mode\n");
     err = bt_le_filter_accept_list_clear();
     if (err) {
       LOG_INF("Cannot clear accept list (err: %d)\n", err);
@@ -93,29 +97,36 @@ static void adv_work_handler(struct k_work *work) {
     err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) {
       LOG_INF("Advertising failed to start (err %d)\n", err);
-      return;
-    }
-    LOG_INF("Advertising successfully started\n");
-    return;
-  }
-
-  int allowed_cnt = setup_accept_list(BT_ID_DEFAULT);
-  if (allowed_cnt < 0) {
-    LOG_INF("Acceptlist setup failed (err:%d)\n", allowed_cnt);
-  } else {
-    if (allowed_cnt == 0) {
-      LOG_INF("Advertising with no Accept list \n");
-      err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     } else {
-      LOG_INF("Advertising with Accept list \n");
-      LOG_INF("Acceptlist setup number  = %d \n", allowed_cnt);
-      err = bt_le_adv_start(BT_LE_ADV_CONN_ACCEPT_LIST, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+      LOG_INF("Advertising successfully started\n");
     }
-    if (err) {
-      LOG_INF("Advertising failed to start (err %d)\n", err);
-      return;
+  } else {
+    LOG_INF("Advertising in Paired Mode\n");
+    int allowed_cnt = setup_accept_list(BT_ID_DEFAULT);
+    if (allowed_cnt < 0) {
+      LOG_INF("Acceptlist setup failed (err:%d)\n", allowed_cnt);
+    } else {
+      if (allowed_cnt == 0) {
+        LOG_INF("Advertising with no Accept list \n");
+        err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+      } else {
+        LOG_INF("Advertising with Accept list \n");
+        LOG_INF("Acceptlist setup number  = %d \n", allowed_cnt);
+
+        static struct bt_le_adv_param adv_param = *BT_LE_ADV_CONN_FAST_1;
+
+        adv_param.options |= BT_LE_ADV_OPT_FILTER_CONN;
+        adv_param.peer = &paired_addr;
+        LOG_INF("Advertising to Peer : %x %x \n", adv_param.peer->a.val[0], adv_param.peer->a.val[1]);
+        mfg_data[0] = 0;
+        err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+      }
+      if (err) {
+        LOG_INF("Advertising failed to start (err %d)\n", err);
+      } else {
+        LOG_INF("Advertising successfully started\n");
+      }
     }
-    LOG_INF("Advertising successfully started\n");
   }
 }
 

@@ -71,15 +71,16 @@ class LoraDevice {
   lora_id GetLoraId() { return {.mac_id = mac_id_, .node_id = node_id_}; }
 
  protected:
+  size_t rx_message_time{MESSAGE_TIME_MS};
   network_header rx_net_header;
   message_header rx_msg_header;
   uint8_t node_id_{};
   uint32_t mac_id_{};
   bool registered_{};
 
-  bool Transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length) {
+  bool Transmit(uint8_t dest_id, uint8_t msg_id, uint8_t *msg_data, uint8_t msg_length, bool forced = false) {
     DECLARE_MYL_UTILS_LOG();
-    if (msg_id && !registered_) {
+    if (msg_id && !registered_ && !forced) {
       LOG_INF("Can't transmit non-network messages before registration");
       return false;
     }
@@ -204,7 +205,6 @@ class LoraDevice {
   uint8_t net_id_;
   lora_msg_cb msg_cb_;
   bool isServer_{};
-  size_t rx_message_time{MESSAGE_TIME_MS};
 
   bool reply = false;
 

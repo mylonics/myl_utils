@@ -26,6 +26,13 @@ class LoraServer : public LoraDevice {
     return ret;
   }
 
+  void TempRunner() {
+    rx_message_time = 5000;
+    while (true) {
+      Receive();
+    }
+  }
+
   void Runner() {
     int broadcast_request_count = 0;
     while (true) {

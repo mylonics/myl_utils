@@ -19,6 +19,16 @@ class LoraClient : public LoraDevice {
     }
   }
 
+  void HelloRunner() {
+    while (true) {
+      char msg[] = "Hello World";
+      Transmit(0, 19, (uint8_t *)msg, sizeof(msg), true);
+      msg_queued_ = false;
+      reply_request = false;
+      k_sleep(K_MSEC(1000));
+    }
+  }
+
   void TempRunner() {
     while (true) {
       if (msg_queued_) {

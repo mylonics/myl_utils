@@ -51,7 +51,6 @@ config MYL_UTILS_LORA
 	default n
 	depends on MYL_UTILS
 	select LORA
-	select LORA_MODULE_BACKEND_LORA_BASICS_MODEM
 	help
 	  This option enables the use of the mylonics lora libraries.
 
@@ -109,7 +108,7 @@ config MYL_UTILS_LOG_LEVEL
     default 3
     depends on LOG
     help
-      Sets log level for modules which don't specify it explicitly. When
+      Sets log level for modules which dont specify it explicitly. When
       set to 0 it means log will not be activated for those modules.
       Levels are:
 

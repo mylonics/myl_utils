@@ -13,6 +13,10 @@
 #error Enable CONFIG_MYL_UTILS_LORA in kconfig (prj.conf)
 #endif
 
+#ifndef CONFIG_LORA_MODULE_BACKEND_LORA_BASICS_MODEM
+#error Enable CONFIG_LORA_MODULE_BACKEND_LORA_BASICS_MODEM in kconfig (prj.conf)
+#endif
+
 #define MAX_DATA_LENGTH 200
 
 struct network_header {
@@ -92,24 +96,41 @@ class LoraDevice {
 
     uint16_t checksum = FletcherChecksumCalculation(msg_data, msg_length);
 
-    uint8_t total_parts = (msg_length / MAX_DATA_LENGTH) + 1;
+    uint8_t total_parts = (msg_length + MAX_DATA_LENGTH - 1) / MAX_DATA_LENGTH;  // ceil div, handles exact multiples
 
     EnableTx();
     for (int i = 0; i < total_parts; i++) {
-      output_buffer[4] = (i + 1) << 4 | total_parts;
+      output_buffer[4] = (uint8_t)(((i + 1) << 4) | (total_parts & 0x0F));
 
-      uint8_t data_size = (total_parts - i) == 1 ? msg_length % MAX_DATA_LENGTH : MAX_DATA_LENGTH;
+      size_t offset = (size_t)i * MAX_DATA_LENGTH;
+      uint8_t data_size = 0;
+      if (offset < msg_length) {
+        size_t remaining = msg_length - offset;
+        data_size = (uint8_t)(remaining > MAX_DATA_LENGTH ? MAX_DATA_LENGTH : remaining);
+      }
 
       output_buffer[5] = data_size;
       memcpy(output_buffer + 6, msg_data + (i * MAX_DATA_LENGTH), data_size);
 
-      // need to add checksum
-      if ((total_parts - i) == 1) {
-        output_buffer[5] = output_buffer[5] + 2;
-        output_buffer[6 + data_size] = checksum;
-        output_buffer[6 + data_size + 1] = checksum >> 8;
+      // need to add checksum on last part
+      if ((i + 1) == total_parts) {
+        // append 2 checksum bytes after payload
+        output_buffer[5] = (uint8_t)(output_buffer[5] + 2);
+        output_buffer[6 + data_size] = (uint8_t)(checksum & 0xFF);
+        output_buffer[6 + data_size + 1] = (uint8_t)((checksum >> 8) & 0xFF);
       }
-      int ret = lora_send(lora_dev_, output_buffer, 6 + output_buffer[5]);
+
+      // bounds check to avoid sending more than buffer
+      size_t to_send = 6 + output_buffer[5];
+      if (to_send > sizeof(output_buffer)) {
+        LOG_ERR("LoRa Send: packet too large to send %d", (int)to_send);
+        if (!isServer_) {
+          EnableRx();
+        }
+        return false;
+      }
+
+      int ret = lora_send(lora_dev_, output_buffer, (size_t)to_send);
       if (ret < 0) {
         LOG_ERR("LoRa Send failed %d msg id %d first byte %d", ret, msg_id, msg_data[0]);
         if (!isServer_) {
@@ -127,75 +148,138 @@ class LoraDevice {
   };
 
   void Receive() {
-    int ret;
     if (!EnableRx()) {
       return;
     }
 
+    DECLARE_MYL_UTILS_LOG();
     int16_t rssi;
     int8_t snr;
-    uint8_t *data = raw_rx_buffer;
-    DECLARE_MYL_UTILS_LOG();
-    LOG_DBG("Starting Receive");
-    ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi, &snr);
-    if (ret < 0) {
-      if (ret == -11) {
-        return;
+    bool assembling = true;
+    bool got_any = false;
+    bool final_part = false;
+    uint8_t expected_parts = 0;
+    uint8_t next_part_index = 1;
+    rx_msg_header.length = 0;  // reset for new message
+
+    while (assembling) {
+      uint8_t *data = raw_rx_buffer;
+      int ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi, &snr);
+      if (ret < 0) {
+        if (ret == -11) {  // timeout
+          // If we already started assembling and timed out mid-message, abort
+          if (got_any) {
+            LOG_WRN("RX timeout mid-multipart (got %d bytes)", rx_msg_header.length);
+          }
+          break;
+        }
+        LOG_INF("RX Error %d", ret);
+        break;
       }
-      LOG_INF("RX Error %d", ret);
-      for (int i = 0; i < 100; i++) {
-        raw_rx_buffer[i] = 0;
+      if (ret < 6) {
+        LOG_DBG("Short RX %d", ret);
+        continue;  // keep listening within loop
       }
-      return;
+
+      uint8_t part_index = data[4] >> 4;  // 1-based
+      uint8_t total_parts = data[4] & 0x0F;
+      uint8_t part_total_len = data[5];
+
+      // Validate frame length vs declared payload
+      if ((size_t)(6 + part_total_len) > (size_t)ret) {
+        LOG_ERR("LoRa RX: declared part length %d exceeds received bytes %d", part_total_len, ret);
+        break;
+      }
+
+      if (!got_any) {
+        // First fragment: capture headers
+        rx_net_header.network = data[0];
+        rx_net_header.src = data[1];
+        rx_net_header.dest = data[2];
+        rx_msg_header.msg_id = data[3];
+        expected_parts = total_parts ? total_parts : 1;  // guard zero
+        next_part_index = 1;
+        got_any = true;
+      } else {
+        // Consistency check for subsequent fragments
+        if (rx_net_header.network != data[0] || rx_net_header.src != data[1] || rx_net_header.dest != data[2] ||
+            rx_msg_header.msg_id != data[3] || expected_parts != total_parts) {
+          LOG_ERR("LoRa RX: fragment header mismatch, aborting multipart");
+          break;
+        }
+      }
+
+      if (part_index != next_part_index) {
+        LOG_ERR("LoRa RX: unexpected part index %d expected %d", part_index, next_part_index);
+        break;
+      }
+
+      bool is_final = (part_index == expected_parts);
+      if (!is_final) {
+        if (part_total_len == 0) {
+          LOG_ERR("LoRa RX: zero-length non-final part");
+          break;
+        }
+        if ((size_t)rx_msg_header.length + part_total_len > sizeof(input_buffer)) {
+          LOG_ERR("LoRa RX: overflow assembling non-final part");
+          break;
+        }
+        memcpy(input_buffer + rx_msg_header.length, data + 6, part_total_len);
+        rx_msg_header.length += part_total_len;
+      } else {
+        // final part includes checksum at tail (2 bytes)
+        if (part_total_len < 2) {
+          LOG_ERR("LoRa RX: final part too short for checksum");
+          break;
+        }
+        uint8_t payload_bytes = (uint8_t)(part_total_len - 2);
+        if ((size_t)rx_msg_header.length + payload_bytes > sizeof(input_buffer)) {
+          LOG_ERR("LoRa RX: overflow assembling final part");
+          break;
+        }
+        memcpy(input_buffer + rx_msg_header.length, data + 6, payload_bytes);
+        rx_msg_header.length += payload_bytes;
+        if ((size_t)rx_msg_header.length + 2 <= sizeof(input_buffer)) {
+          input_buffer[rx_msg_header.length] = data[6 + payload_bytes];
+          input_buffer[rx_msg_header.length + 1] = data[6 + payload_bytes + 1];
+        } else {
+          LOG_ERR("LoRa RX: no space to store checksum");
+          break;
+        }
+        final_part = true;
+      }
+
+      if (is_final) {
+        assembling = false;  // done
+      } else {
+        next_part_index++;
+        // continue loop to get next fragment quickly (no mode switch yet)
+      }
     }
 
     if (isServer_) {
-      if (!EnableTx()) {
-        return;
-      }
+      EnableTx();
     }
 
-    uint8_t current_part = data[4] >> 4;
-    if (multipart) {
-      if (rx_net_header.network == data[0] && rx_net_header.dest == data[2] && rx_net_header.src == data[1]) {
-        if (rx_msg_header.msg_id != data[3]) {
-          multipart = false;
-          return;
-        }
-      }
+    if (!got_any || !final_part) {
+      // Nothing complete assembled; if server we still need to restore TX
+      return;
+    }
+
+    // Validate checksum for completed packet
+    rx_msg_header.data = input_buffer;
+    if ((size_t)rx_msg_header.length + 1 < sizeof(input_buffer)) {
+      uint16_t checksum = FletcherChecksumCalculation(input_buffer, (uint8_t)rx_msg_header.length);
+      uint16_t stored =
+          (uint16_t)input_buffer[rx_msg_header.length] | ((uint16_t)input_buffer[rx_msg_header.length + 1] << 8);
+      rx_msg_header.checksum_passed = (stored == checksum);
     } else {
-      rx_msg_header.length = 0;
-      rx_net_header.network = data[0];
-      rx_net_header.src = data[1];
-      rx_net_header.dest = data[2];
-
-      rx_msg_header.msg_id = data[3];
-      total_parts = data[4] & 0xF;
-      if (total_parts > 1) {
-        multipart = true;
-      } else {
-        multipart = false;
-      }
+      rx_msg_header.checksum_passed = false;
     }
 
-    memcpy(input_buffer + rx_msg_header.length, data + 6, data[5]);
-    rx_msg_header.length += data[5] - 2;
-
-    // LOG_INF("LoRa RX RSSI: %d dBm, SNR: %d dB", rssi, snr);
-    if (current_part == total_parts) {
-      multipart = false;
-      rx_msg_header.data = input_buffer;
-      uint16_t checksum = FletcherChecksumCalculation(input_buffer, rx_msg_header.length);
-      if ((input_buffer[rx_msg_header.length] | input_buffer[rx_msg_header.length + 1] << 8) == checksum) {
-        rx_msg_header.checksum_passed = true;
-      } else {
-        rx_msg_header.checksum_passed = false;
-      }
-
-      HandleMessage();
-      if (registered_ && rx_msg_header.msg_id) {
-        msg_cb_(rx_net_header, rx_msg_header);
-      }
+    HandleMessage();
+    if (registered_ && rx_msg_header.msg_id) {
+      msg_cb_(rx_net_header, rx_msg_header);
     }
   }
 

@@ -82,7 +82,6 @@ class LoraServer : public LoraDevice {
     } else {
       LOG_INF("Re-Registering Client %d %d", client_mac, client_node_id);
     }
-
     clients[client_node_id - 1].missed_replies = 10;
   }
 
@@ -90,17 +89,17 @@ class LoraServer : public LoraDevice {
     for (size_t i = 0; i < registered_client_length; i++) {
       if (clients[i].missed_replies >= 10) {
         clients[i].missed_replies = 0;
-        uint8_t data[5];
+        uint8_t data[6];
 
         data[0] = (uint8_t)NETWORK_MSG_IDS::REGISTER_REPLY;
         data[1] = clients[i].node_id;
-        data[2] = clients[i].mac_id >> 24;
-        data[3] = clients[i].mac_id >> 16;
-        data[4] = clients[i].mac_id >> 8;
-        data[5] = clients[i].mac_id;
+        data[2] = (uint8_t)((clients[i].mac_id >> 24) & 0xFF);
+        data[3] = (uint8_t)((clients[i].mac_id >> 16) & 0xFF);
+        data[4] = (uint8_t)((clients[i].mac_id >> 8) & 0xFF);
+        data[5] = (uint8_t)((clients[i].mac_id) & 0xFF);
         DECLARE_MYL_UTILS_LOG();
         LOG_INF("Sending Registration to node %d mac %d", clients[i].node_id, clients[i].mac_id);
-        Transmit(0, 0, data, 6);
+        Transmit(0, 0, data, 6, true);
       }
     }
   }

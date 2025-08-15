@@ -51,6 +51,7 @@ config MYL_UTILS_LORA
 	default n
 	depends on MYL_UTILS
 	select LORA
+	select LORA_MODULE_BACKEND_LORA_BASICS_MODEM
 	help
 	  This option enables the use of the mylonics lora libraries.
 

@@ -20,18 +20,21 @@ class LoraClient : public LoraDevice {
   }
 
   void HelloRunner() {
+    DECLARE_MYL_UTILS_LOG();
     while (true) {
       char msg[] = "Hello World";
+      LOG_INF("Sending Hello World message");
       Transmit(0, 19, (uint8_t *)msg, sizeof(msg), true);
       msg_queued_ = false;
       reply_request = false;
-      k_sleep(K_MSEC(1000));
     }
   }
 
   void TempRunner() {
+    DECLARE_MYL_UTILS_LOG();
     while (true) {
       if (msg_queued_) {
+        LOG_INF("Sending queued message %d to %d", queued_msg_header_.msg_id, queued_destination_);
         Transmit(queued_destination_, queued_msg_header_.msg_id, queued_buffer_, queued_msg_header_.length, true);
         msg_queued_ = false;
         reply_request = false;

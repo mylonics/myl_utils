@@ -93,9 +93,8 @@ class LoraDevice {
     uint16_t checksum = FletcherChecksumCalculation(msg_data, msg_length);
 
     uint8_t total_parts = (msg_length / MAX_DATA_LENGTH) + 1;
-    if (!isServer_) {
-      EnableTx();
-    }
+
+    EnableTx();
     for (int i = 0; i < total_parts; i++) {
       output_buffer[4] = (i + 1) << 4 | total_parts;
 
@@ -117,6 +116,8 @@ class LoraDevice {
           EnableRx();
         }
         return false;
+      } else {
+        LOG_DBG("LoRa Send succeeded msg id %d first byte %d", msg_id, msg_data[0]);
       }
     }
     if (!isServer_) {
@@ -127,10 +128,8 @@ class LoraDevice {
 
   void Receive() {
     int ret;
-    if (isServer_) {
-      if (!EnableRx()) {
-        return;
-      }
+    if (!EnableRx()) {
+      return;
     }
 
     int16_t rssi;
@@ -219,27 +218,24 @@ class LoraDevice {
 
   virtual void HandleMessage() = 0;
 
-  bool EnableTx() {
-    DECLARE_MYL_UTILS_LOG();
-    config.tx = true;
-    int ret = lora_config(lora_dev_, &config);
-    if (ret < 0) {
-      LOG_ERR("LoRa TX config failed %d", ret);
-      return false;
+  bool SetTxRx(bool tx) {
+    if (config.tx != tx) {
+      config.tx = tx;
+
+      int ret = lora_config(lora_dev_, &config);
+      if (ret < 0) {
+        DECLARE_MYL_UTILS_LOG();
+        LOG_ERR("LoRa TX:%d config failed %d", config.tx, ret);
+        config.tx = !config.tx;
+        return false;
+      }
     }
     return true;
   }
 
-  bool EnableRx() {
-    DECLARE_MYL_UTILS_LOG();
-    config.tx = false;
-    int ret = lora_config(lora_dev_, &config);
-    if (ret < 0) {
-      LOG_ERR("LoRa RX config failed %d", ret);
-      return false;
-    }
-    return true;
-  }
+  bool EnableTx() { return SetTxRx(true); }
+
+  bool EnableRx() { return SetTxRx(false); }
 
   static uint16_t FletcherChecksumCalculation(uint8_t *buffer, uint8_t data_length) {
     uint8_t byte1{};

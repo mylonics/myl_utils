@@ -101,6 +101,14 @@ config MYL_UTILS_NVM
 	help
 	  This option enables the use of the USB serial implementation.
 
+config MYL_UTILS_CPU_TEMP
+	bool "Enable Mylonics CPU temperature helper"
+	default n
+	depends on MYL_UTILS
+	select SENSOR
+	help
+	  Enables helper to read die temperature via Zephyr sensor API.
+
 
 config MYL_UTILS_LOG_LEVEL
     int "Default log level"

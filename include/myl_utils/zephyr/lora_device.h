@@ -72,6 +72,16 @@ class LoraDevice {
     }
   }
 
+  void HelloRunner() {
+    DECLARE_MYL_UTILS_LOG();
+    while (true) {
+      char msg[] = "Hello World";
+      Transmit(0, 19, (uint8_t *)msg, sizeof(msg), true);
+    }
+  }
+
+  int16_t GetRssi() const { return rssi_; }
+
   lora_id GetLoraId() { return {.mac_id = mac_id_, .node_id = node_id_}; }
 
  protected:
@@ -153,7 +163,6 @@ class LoraDevice {
     }
 
     DECLARE_MYL_UTILS_LOG();
-    int16_t rssi;
     int8_t snr;
     bool assembling = true;
     bool got_any = false;
@@ -164,7 +173,7 @@ class LoraDevice {
 
     while (assembling) {
       uint8_t *data = raw_rx_buffer;
-      int ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi, &snr);
+      int ret = lora_recv(lora_dev_, data, ARRAY_SIZE(raw_rx_buffer), K_MSEC(rx_message_time), &rssi_, &snr);
       if (ret < 0) {
         if (ret == -11) {  // timeout
           // If we already started assembling and timed out mid-message, abort
@@ -288,7 +297,7 @@ class LoraDevice {
   uint8_t net_id_;
   lora_msg_cb msg_cb_;
   bool isServer_{};
-
+  int16_t rssi_{};
   bool reply = false;
 
   uint8_t output_buffer[256];

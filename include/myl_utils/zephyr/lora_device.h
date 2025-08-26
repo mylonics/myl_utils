@@ -53,12 +53,12 @@ class LoraDevice {
     }
     config.frequency = 915100000;
     config.bandwidth = BW_500_KHZ;
-    config.datarate = SF_6;
+    config.datarate = SF_9;
     config.preamble_len = 8;
     config.coding_rate = CR_4_5;
     config.iq_inverted = false;
     config.public_network = false;
-    config.tx_power = 14;
+    config.tx_power = 22;
     config.tx = true;
 
     if (!isServer_) {

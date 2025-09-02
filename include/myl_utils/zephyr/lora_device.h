@@ -37,7 +37,7 @@ struct lora_id {
   uint8_t node_id;
 };
 
-#define MESSAGE_TIME_MS 100
+#define MESSAGE_TIME_MS 200
 
 typedef void (*lora_msg_cb)(const struct network_header, const struct message_header);
 

@@ -51,7 +51,7 @@ class LoraDevice {
       LOG_ERR("%s Device not ready", lora_dev->name);
       return;
     }
-    config.frequency = 915100000;
+    config.frequency = 866500000;
     config.bandwidth = BW_500_KHZ;
     config.datarate = SF_9;
     config.preamble_len = 8;

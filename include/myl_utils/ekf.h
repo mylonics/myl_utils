@@ -201,7 +201,14 @@ class Ekf {
     float cr = std::cos(roll);
     float sp = std::sin(pitch);
     float cp = std::cos(pitch);
-    float tp = std::tan(pitch);
+
+    // Protect against gimbal lock (pitch approaching ±π/2)
+    // Clamp cos(pitch) to avoid division by zero
+    const float kMinCosPitch = 0.001f;
+    if (std::fabs(cp) < kMinCosPitch) {
+      cp = (cp >= 0.0f) ? kMinCosPitch : -kMinCosPitch;
+    }
+    float tp = sp / cp;  // tan(pitch) = sin(pitch) / cos(pitch)
 
     // Update orientation using gyroscope
     // Convert body rates to Euler angle rates
@@ -261,36 +268,23 @@ class Ekf {
   void UpdateGps(const GpsData& gps) {
     if (!gps.valid) return;
 
-    // Position update (3 measurements)
+    // Position update (3 measurements mapping directly to states 0, 1, 2)
     float z_pos[3] = {gps.position_n, gps.position_e, gps.position_d};
-    float H_pos[3][kNumStates] = {{0}};
-    H_pos[0][0] = 1.0f;
-    H_pos[1][1] = 1.0f;
-    H_pos[2][2] = 1.0f;
-
     float R_pos[3] = {config_.r_gps_position, config_.r_gps_position,
                       config_.r_gps_position};
-    ApplyMeasurementUpdate(z_pos, (float*)H_pos, R_pos, 3, 0);
+    ApplyMeasurementUpdate(z_pos, R_pos, 3, 0);
 
-    // Velocity update (3 measurements)
+    // Velocity update (3 measurements mapping directly to states 3, 4, 5)
     float z_vel[3] = {gps.velocity_n, gps.velocity_e, gps.velocity_d};
-    float H_vel[3][kNumStates] = {{0}};
-    H_vel[0][3] = 1.0f;
-    H_vel[1][4] = 1.0f;
-    H_vel[2][5] = 1.0f;
-
     float R_vel[3] = {config_.r_gps_velocity, config_.r_gps_velocity,
                       config_.r_gps_velocity};
-    ApplyMeasurementUpdate(z_vel, (float*)H_vel, R_vel, 3, 3);
+    ApplyMeasurementUpdate(z_vel, R_vel, 3, 3);
 
     // Heading update (only if moving fast enough)
     if (gps.ground_speed >= config_.min_speed_for_heading) {
       float z_hdg[1] = {gps.heading};
-      float H_hdg[1][kNumStates] = {{0}};
-      H_hdg[0][8] = 1.0f;
-
       float R_hdg[1] = {config_.r_gps_heading};
-      ApplyMeasurementUpdateAngle(z_hdg, (float*)H_hdg, R_hdg, 1, 8);
+      ApplyMeasurementUpdateAngle(z_hdg, R_hdg, 1, 8);
     }
 
     initialized_ = true;
@@ -308,11 +302,8 @@ class Ekf {
     if (!config_.use_magnetometer || !mag.valid) return;
 
     float z_hdg[1] = {mag.heading};
-    float H_hdg[1][kNumStates] = {{0}};
-    H_hdg[0][8] = 1.0f;
-
     float R_hdg[1] = {config_.r_mag_heading};
-    ApplyMeasurementUpdateAngle(z_hdg, (float*)H_hdg, R_hdg, 1, 8);
+    ApplyMeasurementUpdateAngle(z_hdg, R_hdg, 1, 8);
   }
 
   /**
@@ -427,8 +418,16 @@ class Ekf {
 
   /**
    * @brief Apply Kalman measurement update for linear measurements
+   *
+   * Uses a simplified sequential update where each measurement maps directly
+   * to one state (identity H matrix for the specific state indices).
+   *
+   * @param z Measurement values
+   * @param R Measurement noise variances
+   * @param num_meas Number of measurements
+   * @param state_offset Starting state index for measurements
    */
-  void ApplyMeasurementUpdate(const float* z, const float* H, const float* R,
+  void ApplyMeasurementUpdate(const float* z, const float* R,
                               int num_meas, int state_offset) {
     for (int m = 0; m < num_meas; ++m) {
       int idx = state_offset + m;
@@ -475,11 +474,16 @@ class Ekf {
   /**
    * @brief Apply Kalman measurement update for angle measurements
    *
-   * Handles angle wrapping for heading updates
+   * Handles angle wrapping for heading updates. Uses a simplified sequential
+   * update where each measurement maps directly to one state.
+   *
+   * @param z Measurement values (angles in radians)
+   * @param R Measurement noise variances
+   * @param num_meas Number of measurements
+   * @param state_offset Starting state index for measurements
    */
-  void ApplyMeasurementUpdateAngle(const float* z, const float* H,
-                                   const float* R, int num_meas,
-                                   int state_offset) {
+  void ApplyMeasurementUpdateAngle(const float* z, const float* R,
+                                   int num_meas, int state_offset) {
     for (int m = 0; m < num_meas; ++m) {
       int idx = state_offset + m;
 

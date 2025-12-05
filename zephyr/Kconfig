@@ -109,6 +109,14 @@ config MYL_UTILS_CPU_TEMP
 	help
 	  Enables helper to read die temperature via Zephyr sensor API.
 
+config MYL_UTILS_EKF
+	bool "Enable Mylonics Extended Kalman Filter"
+	default n
+	depends on MYL_UTILS
+	help
+	  This option enables the Extended Kalman Filter for sensor fusion.
+	  The EKF fuses GPS (position, velocity, heading) with IMU data
+	  (gyroscope, accelerometer) and optionally magnetometer data.
 
 config MYL_UTILS_LOG_LEVEL
     int "Default log level"

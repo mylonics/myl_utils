@@ -14,8 +14,6 @@
  * 3. Call ProcessCommand() to execute the transfer
  */
 
-#include <functional>
-
 #include "buffer.h"
 #include "myl_utils/noncopyable.h"
 #include "stdint.h"
@@ -46,8 +44,8 @@ struct SpiPacket {
   Data &tx_data;
   Data &rx_data;
   PacketType type;
-  std::function<void(bool)> chip_select;   ///< Optional chip select callback (enable/disable)
-  std::function<void(Data &)> callback;    ///< Optional completion callback
+  void (*chip_select)(bool);   ///< Optional chip select callback (enable/disable)
+  void (*callback)(Data &);    ///< Optional completion callback
 
   SpiPacket(Data &tx_data, Data &rx_data)
       : tx_data(tx_data), rx_data(rx_data), type{PacketType::Write}, chip_select{nullptr}, callback{nullptr} {}
@@ -61,7 +59,7 @@ struct I2cPacket {
   Data &tx_data;
   Data &rx_data;
   PacketType type;
-  std::function<void(Data &)> callback;    ///< Optional completion callback
+  void (*callback)(Data &);    ///< Optional completion callback
 
   I2cPacket(uint8_t addr, Data &tx_data, Data &rx_data)
       : addr(addr), tx_data(tx_data), rx_data(rx_data), type{PacketType::Write}, callback{nullptr} {}

@@ -5,7 +5,7 @@
  * @brief Zephyr I2C device implementation
  *
  * Provides a synchronous I2C device class for Zephyr RTOS. This implementation
- * extends the Spi base class to work with the peripheral packet system.
+ * extends the I2c base class to work with the peripheral packet system.
  *
  * Usage:
  * @code

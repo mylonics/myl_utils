@@ -34,7 +34,7 @@
 #define BLE_RN_ENCRYPT_CHARAC_DECLARATION(name, read_callback)                                          \
   BT_GATT_CHARACTERISTIC((const struct bt_uuid *)&name##_CHAR, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, \
                          BT_GATT_PERM_READ_ENCRYPT, read_callback, NULL, NULL),                         \
-      BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+      BT_GATT_CCC(NULL, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 
 #define BLE_RW_CHARAC_DECLARATION(name, read_callback, write_callback)                                 \
   BT_GATT_CHARACTERISTIC((const struct bt_uuid *)&name##_CHAR, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE, \
@@ -44,7 +44,7 @@
 #define BLE_RW_ENCRYPT_CHARAC_DECLARATION(name, read_callback, write_callback)                                         \
   BT_GATT_CHARACTERISTIC((const struct bt_uuid *)&name##_CHAR, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,                 \
                          BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT, read_callback, write_callback, NULL), \
-      BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+      BT_GATT_CCC(NULL, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 
 #define BLE_DEFAULT_AD_SD()                                                                     \
   static uint8_t mfg_data[10] = {};                                                             \

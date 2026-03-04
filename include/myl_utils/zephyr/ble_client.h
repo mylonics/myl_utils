@@ -8,11 +8,18 @@
 //   2. Populate each device's name, scan prefix, target, and callbacks.
 //   3. Call ble_client_init() with the device array, service UUID, and passkey.
 //
+// Address persistence:
+//   The library stores a role→address mapping in Zephyr settings under
+//   "ble_dev/<index>". On init it validates these against actual bonds
+//   via bt_foreach_bond and prunes stale entries. No application-level
+//   address storage is needed.
+//
 // Requires CONFIG_BT_SECURITY_ERR_TO_STR=y in prj.conf.
 // ---------------------------------------------------------------------------
 #pragma once
 
 #include <myl_utils/zephyr/ble_helper.h>
+#include <stdio.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -55,11 +62,15 @@ struct BleDeviceConnection {
   bool pairing_mode;
   uint8_t security_fail_count;
 
+  // Paired address — loaded from settings, validated against bonds
+  bt_addr_le_t paired_addr;
+
   // GATT discovery state
   struct bt_gatt_discover_params discover_params;
   struct bt_uuid_16 discover_uuid;
   struct bt_gatt_subscribe_params subscribe_params;
   uint16_t char_handle;
+  uint16_t value_handle;
   DiscoveryState disc_state;
 
   const GattDiscoveryTarget *target;
@@ -67,8 +78,6 @@ struct BleDeviceConnection {
   // Application-layer callbacks
   void (*on_connected_cb)(bool connected);
   void (*on_needs_pairing)();  // called when scan starts and device has no paired addr
-  bool (*set_addr)(const bt_addr_le_t *addr);
-  bt_addr_le_t (*get_addr)();
 };
 
 // ---------------------------------------------------------------------------
@@ -104,6 +113,65 @@ static atomic_t _ble_scanning = ATOMIC_INIT(0);
 // Forward declarations
 static void ble_start_scan(void);
 static void ble_start_scan_deferred(void);
+
+// ---------------------------------------------------------------------------
+// Address persistence — settings under "ble_dev/<device_index>"
+// ---------------------------------------------------------------------------
+static void ble_save_device_addr(BleDeviceConnection *dev, const bt_addr_le_t *addr) {
+  DECLARE_MYL_UTILS_LOG();
+  bt_addr_le_copy(&dev->paired_addr, addr);
+  int idx = (int)(dev - _ble_devices);
+  char key[16];
+  snprintf(key, sizeof(key), "ble_dev/%d", idx);
+  int err = settings_save_one(key, addr, sizeof(*addr));
+  if (err) LOG_INF("Failed to save addr for %s (%d)", dev->name, err);
+}
+
+static void ble_clear_device_addr(BleDeviceConnection *dev) {
+  ble_save_device_addr(dev, BT_ADDR_LE_NONE);
+}
+
+static int ble_device_settings_set(const char *name, size_t len,
+                                   settings_read_cb read_cb, void *cb_arg) {
+  if (!_ble_devices) return -ENOENT;
+  int idx = atoi(name);
+  if (idx < 0 || idx >= _ble_device_count) return -ENOENT;
+  if (len != sizeof(bt_addr_le_t)) return -EINVAL;
+  int rc = read_cb(cb_arg, &_ble_devices[idx].paired_addr, sizeof(bt_addr_le_t));
+  return rc < 0 ? rc : 0;
+}
+
+SETTINGS_STATIC_HANDLER_DEFINE(ble_dev, "ble_dev", NULL,
+                               ble_device_settings_set, NULL, NULL);
+
+// ---------------------------------------------------------------------------
+// Bond validation — prune stored addresses with no matching bond
+// ---------------------------------------------------------------------------
+struct ble_bond_check {
+  const bt_addr_le_t *addr;
+  bool found;
+};
+
+static void ble_bond_check_cb(const struct bt_bond_info *info, void *user_data) {
+  struct ble_bond_check *chk = (struct ble_bond_check *)user_data;
+  if (bt_addr_le_eq(&info->addr, chk->addr)) {
+    chk->found = true;
+  }
+}
+
+static void ble_validate_bonds(void) {
+  DECLARE_MYL_UTILS_LOG();
+  for (int i = 0; i < _ble_device_count; i++) {
+    BleDeviceConnection *dev = &_ble_devices[i];
+    if (!is_valid_paired_addr(&dev->paired_addr)) continue;
+    struct ble_bond_check chk = { &dev->paired_addr, false };
+    bt_foreach_bond(BT_ID_DEFAULT, ble_bond_check_cb, &chk);
+    if (!chk.found) {
+      LOG_INF("%s: stale addr with no bond, clearing", dev->name);
+      ble_clear_device_addr(dev);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Device lookup
@@ -148,6 +216,7 @@ static uint8_t ble_generic_discovery_func(struct bt_conn *conn, const struct bt_
     case DISC_FIND_CHAR:
       LOG_INF("%s: Found characteristic (handle %u)", dev->name, attr->handle);
       dev->char_handle = attr->handle;
+      dev->value_handle = bt_gatt_attr_value_handle(attr);
 
       if (dev->target->action == DiscoveryAction::SUBSCRIBE_NOTIFY) {
         memcpy(&dev->discover_uuid, BT_UUID_GATT_CCC, sizeof(dev->discover_uuid));
@@ -161,7 +230,7 @@ static uint8_t ble_generic_discovery_func(struct bt_conn *conn, const struct bt_
       } else {
         // WRITE_VALUE — send initial data to the characteristic
         if (dev->target->write_data && dev->target->write_len > 0) {
-          err = bt_gatt_write_without_response(conn, attr->handle,
+          err = bt_gatt_write_without_response(conn, dev->value_handle,
                                                dev->target->write_data,
                                                dev->target->write_len, false);
           if (err) LOG_INF("%s: Write failed (%d)", dev->name, err);
@@ -263,11 +332,13 @@ static void ble_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type
   bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 
   // Priority 1: Reconnect to a paired device by address
+  // NOTE: This direct address comparison requires CONFIG_BT_PRIVACY=n on
+  // peripherals.  If privacy is ever enabled the peripheral's address will
+  // rotate via IRK and bt_addr_le_is_bonded() should be used instead.
   for (int i = 0; i < _ble_device_count; i++) {
     BleDeviceConnection *dev = &_ble_devices[i];
     if (dev->conn) continue;
-    bt_addr_le_t paired = dev->get_addr();
-    if (is_valid_paired_addr(&paired) && bt_addr_le_eq(&paired, addr)) {
+    if (is_valid_paired_addr(&dev->paired_addr) && bt_addr_le_eq(&dev->paired_addr, addr)) {
       LOG_INF("Reconnecting to paired %s", dev->name);
       ble_create_connection(&dev->conn, addr, addr_str, dev->name);
       return;
@@ -282,8 +353,7 @@ static void ble_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type
   for (int i = 0; i < _ble_device_count; i++) {
     BleDeviceConnection *dev = &_ble_devices[i];
     if (dev->conn) continue;
-    bt_addr_le_t paired = dev->get_addr();
-    if (is_valid_paired_addr(&paired)) continue;
+    if (is_valid_paired_addr(&dev->paired_addr)) continue;
     if (!dev->pairing_mode) continue;
     if (!strncmp(dev->scan_name_prefix, name.name, dev->scan_name_prefix_len)) {
       LOG_INF("Found new %s: %s", dev->name, addr_str);
@@ -329,8 +399,7 @@ static void ble_start_scan(void) {
   for (int i = 0; i < _ble_device_count; i++) {
     BleDeviceConnection *dev = &_ble_devices[i];
     if (dev->on_needs_pairing) {
-      bt_addr_le_t addr = dev->get_addr();
-      if (!is_valid_paired_addr(&addr) && !dev->pairing_mode) {
+      if (!is_valid_paired_addr(&dev->paired_addr) && !dev->pairing_mode) {
         dev->on_needs_pairing();
       }
     }
@@ -352,7 +421,7 @@ static void ble_security_changed(struct bt_conn *conn, bt_security_t level,
     LOG_INF("Security changed: %s level %u", addr, level);
 
     if (dev) {
-      dev->set_addr(bt_conn_get_dst(conn));
+      // Address is saved in ble_pairing_complete once bond is persisted
       dev->pairing_mode = false;
       dev->security_fail_count = 0;
     }
@@ -374,18 +443,16 @@ static void ble_security_changed(struct bt_conn *conn, bt_security_t level,
         LOG_INF("%s credential failure (err %d), clearing bond and address",
                 dev->name, err);
         bt_unpair(BT_ID_DEFAULT, bt_conn_get_dst(conn));
-        dev->set_addr(BT_ADDR_LE_NONE);
+        ble_clear_device_addr(dev);
         dev->security_fail_count = 0;
         dev->pairing_mode = true;
       } else {
-        LOG_INF("%s transient failure (err %d), retry %d/%d",
-                dev->name, err, dev->security_fail_count, MAX_TRANSIENT_RETRIES);
-
-        if (dev->security_fail_count >= MAX_TRANSIENT_RETRIES) {
-          LOG_INF("%s max transient retries, clearing bond", dev->name);
-          bt_unpair(BT_ID_DEFAULT, bt_conn_get_dst(conn));
-          dev->security_fail_count = 0;
-        }
+        // Transient failure — disconnect and retry, but never unpair.
+        // Unpairing here would desync from the server (which still holds
+        // the bond), creating a deadlock where neither side can reconnect
+        // without manual intervention.
+        LOG_INF("%s transient failure (err %d), retry %d",
+                dev->name, err, dev->security_fail_count);
       }
     }
 
@@ -429,6 +496,7 @@ static void ble_disconnected(struct bt_conn *conn, uint8_t reason) {
   bt_conn_unref(dev->conn);
   dev->conn = NULL;
   dev->char_handle = 0;
+  dev->value_handle = 0;
 
   if (dev->on_connected_cb) dev->on_connected_cb(false);
 
@@ -473,6 +541,35 @@ static struct bt_conn_auth_cb ble_conn_auth_callbacks = {
 };
 
 // ---------------------------------------------------------------------------
+// Auth info callbacks — save address only after bond is fully persisted
+// ---------------------------------------------------------------------------
+static void ble_pairing_complete(struct bt_conn *conn, bool bonded) {
+  DECLARE_MYL_UTILS_LOG();
+  BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+  if (dev && bonded) {
+    ble_save_device_addr(dev, bt_conn_get_dst(conn));
+    LOG_INF("%s: pairing complete, bond stored for %s", dev->name, addr);
+  } else if (dev) {
+    LOG_INF("%s: pairing complete (not bonded)", dev->name);
+  }
+}
+
+static void ble_pairing_failed(struct bt_conn *conn, enum bt_security_err reason) {
+  DECLARE_MYL_UTILS_LOG();
+  BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+  LOG_ERR("%s: pairing failed (reason %d)",
+          dev ? dev->name : "UNKNOWN", reason);
+}
+
+static struct bt_conn_auth_info_cb ble_conn_auth_info_callbacks = {
+    .pairing_complete = ble_pairing_complete,
+    .pairing_failed = ble_pairing_failed,
+};
+
+// ---------------------------------------------------------------------------
 // Initialization & utility
 // ---------------------------------------------------------------------------
 void ble_client_init(BleDeviceConnection *devices, int device_count,
@@ -487,20 +584,29 @@ void ble_client_init(BleDeviceConnection *devices, int device_count,
   _ble_security_level = security_level;
 
   int err = bt_conn_auth_cb_register(&ble_conn_auth_callbacks);
-  if (err) { LOG_INF("conn auth cb error %d", err); return; }
+  if (err) { LOG_ERR("conn auth cb error %d", err); return; }
+
+  err = bt_conn_auth_info_cb_register(&ble_conn_auth_info_callbacks);
+  if (err) { LOG_ERR("auth info cb error %d", err); return; }
 
   err = bt_enable(NULL);
-  if (err) { LOG_INF("Bluetooth init failed (%d)", err); return; }
+  if (err) { LOG_ERR("Bluetooth init failed (%d)", err); return; }
 
   LOG_INF("Bluetooth initialized");
   settings_load();
+  ble_validate_bonds();
   ble_start_scan();
 }
 
 static void ble_disconnect_device(BleDeviceConnection *dev) {
-  bt_addr_le_t addr = dev->get_addr();
-  bt_unpair(BT_ID_DEFAULT, &addr);
+  // Disconnect first, then unpair — calling bt_unpair on an active
+  // connection can trigger the disconnected callback synchronously,
+  // leading to double-disconnect and scan restart races.
   if (dev->conn) {
     bt_conn_disconnect(dev->conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
   }
+  if (is_valid_paired_addr(&dev->paired_addr)) {
+    bt_unpair(BT_ID_DEFAULT, &dev->paired_addr);
+  }
+  ble_clear_device_addr(dev);
 }

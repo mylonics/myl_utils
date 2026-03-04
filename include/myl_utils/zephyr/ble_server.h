@@ -34,10 +34,10 @@ static bool isPairingMode(bool set = false, bool value = false) {
 };
 
 static void pairing_work_handler(struct k_work *work) {
-  int err = bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY);
   DECLARE_MYL_UTILS_LOG();
+  int err = bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY);
   if (err) {
-    LOG_INF("Cannot delete bond (err: %d)\n", err);
+    LOG_INF("Cannot delete bond (err: %d)", err);
   } else {
     LOG_INF("Bond deleted succesfully");
   }
@@ -45,10 +45,10 @@ static void pairing_work_handler(struct k_work *work) {
   isPairingMode(true, true);
   int err_code = bt_le_adv_stop();
   if (err_code) {
-    DECLARE_MYL_UTILS_LOG();
-    LOG_INF("Cannot stop advertising err= %d \n", err_code);
-    return;
+    LOG_INF("Cannot stop advertising err= %d", err_code);
+    // Fall through — still restart advertising in pairing mode
   }
+  advertising_start();
 }
 
 static void setup_accept_list_cb(const struct bt_bond_info *info, void *user_data) {
@@ -110,14 +110,12 @@ static void adv_work_handler(struct k_work *work) {
         LOG_INF("Advertising with no Accept list \n");
         err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
       } else {
-        LOG_INF("Advertising with Accept list \n");
-        LOG_INF("Acceptlist setup number  = %d \n", allowed_cnt);
+        LOG_INF("Advertising with Accept list");
+        LOG_INF("Acceptlist setup number  = %d", allowed_cnt);
 
-        static struct bt_le_adv_param adv_param = *BT_LE_ADV_CONN_FAST_1;
-
+        // Reinitialize from base each time so stale flags don't accumulate
+        struct bt_le_adv_param adv_param = *BT_LE_ADV_CONN_FAST_1;
         adv_param.options |= BT_LE_ADV_OPT_FILTER_CONN;
-        adv_param.peer = &paired_addr;
-        LOG_INF("Advertising to Peer : %x %x \n", adv_param.peer->a.val[0], adv_param.peer->a.val[1]);
         mfg_data[0] = 0;
         err = bt_le_adv_start(&adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
       }
@@ -152,14 +150,14 @@ static void recycled() { advertising_start(); }
 
 static void on_security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
   char addr[BT_ADDR_LE_STR_LEN];
-
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
   DECLARE_MYL_UTILS_LOG();
 
   if (!err) {
-    LOG_INF("Security changed: %s level %u\n", addr, level);
+    LOG_INF("Security changed: %s level %u", addr, level);
   } else {
-    LOG_INF("Security failed: %s level %u err %d\n", addr, level, err);
+    LOG_ERR("Security failed: %s level %u err %d", addr, level, err);
+    bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
   }
 }
 
@@ -187,6 +185,26 @@ static struct bt_conn_auth_cb conn_auth_callbacks = {
     .cancel = auth_cancel,
 };
 
+static void srv_pairing_complete(struct bt_conn *conn, bool bonded) {
+  DECLARE_MYL_UTILS_LOG();
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+  LOG_INF("Pairing complete: %s, bonded: %d", addr, bonded);
+}
+
+static void srv_pairing_failed(struct bt_conn *conn, enum bt_security_err reason) {
+  DECLARE_MYL_UTILS_LOG();
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+  LOG_ERR("Pairing failed: %s, reason %d", addr, reason);
+  bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+}
+
+static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
+    .pairing_complete = srv_pairing_complete,
+    .pairing_failed = srv_pairing_failed,
+};
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {.connected = connected,
                                      .disconnected = disconnected,
                                      .recycled = recycled,
@@ -194,7 +212,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {.connected = connected,
 
 void bt_ready(void) {
   DECLARE_MYL_UTILS_LOG();
-  LOG_INF("Bluetooth initialized\n");
+  LOG_INF("Bluetooth initialized");
 
   settings_load();
 
@@ -210,13 +228,19 @@ int initialize_basic_ble(int passkey) {
   }
   int err = bt_conn_auth_cb_register(&conn_auth_callbacks);
   if (err) {
-    LOG_INF("Failed to register authorization callbacks\n");
+    LOG_ERR("Failed to register authorization callbacks");
+    return -1;
+  }
+
+  err = bt_conn_auth_info_cb_register(&conn_auth_info_callbacks);
+  if (err) {
+    LOG_ERR("Failed to register auth info callbacks (%d)", err);
     return -1;
   }
 
   err = bt_enable(NULL);
   if (err) {
-    printk("Bluetooth init failed (err %d)\n", err);
+    LOG_ERR("Bluetooth init failed (err %d)", err);
     return err;
   }
 

@@ -109,6 +109,55 @@ config MYL_UTILS_CPU_TEMP
 	help
 	  Enables helper to read die temperature via Zephyr sensor API.
 
+config MYL_UTILS_WATCHDOG
+	bool "Enable Mylonics Watchdog helper"
+	default n
+	depends on MYL_UTILS
+	select WATCHDOG
+	select HWINFO
+	help
+	  Enables watchdog and reset-cause logging helpers.
+
+config MYL_UTILS_BLE
+	bool "Enable Mylonics BLE defaults"
+	default n
+	depends on MYL_UTILS
+	select BT
+	select BT_SMP
+	select BT_SMP_SC_ONLY
+	select BT_DEVICE_NAME_DYNAMIC
+	select BT_KEYS_OVERWRITE_OLDEST
+	select BT_SETTINGS
+	select SETTINGS
+	select FLASH
+	select FLASH_PAGE_LAYOUT
+	select FLASH_MAP
+	select NVS
+	help
+	  Enables common BLE settings for Mylonics projects.
+	  Note: Set CONFIG_SETTINGS_NVS=y in prj.conf (choice symbol).
+
+config MYL_UTILS_BLE_SERVER
+	bool "Enable Mylonics BLE Server (Peripheral) defaults"
+	default n
+	depends on MYL_UTILS_BLE
+	select BT_PERIPHERAL
+	select BT_DIS
+	select BT_FIXED_PASSKEY
+	select BT_FILTER_ACCEPT_LIST
+	help
+	  Enables BLE peripheral/server settings for Mylonics projects.
+
+config MYL_UTILS_BLE_CLIENT
+	bool "Enable Mylonics BLE Client (Central) defaults"
+	default n
+	depends on MYL_UTILS_BLE
+	select BT_CENTRAL
+	select BT_GATT_CLIENT
+	select BT_SCAN_WITH_IDENTITY
+	help
+	  Enables BLE central/client settings for Mylonics projects.
+
 
 config MYL_UTILS_LOG_LEVEL
     int "Default log level"

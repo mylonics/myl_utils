@@ -206,7 +206,7 @@ void bt_ready(void) {
 int initialize_basic_ble(int passkey) {
   DECLARE_MYL_UTILS_LOG();
   if (passkey) {
-    bt_passkey_set(191919);
+    bt_passkey_set(passkey);
   }
   int err = bt_conn_auth_cb_register(&conn_auth_callbacks);
   if (err) {

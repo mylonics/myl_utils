@@ -1,3 +1,15 @@
+// ---------------------------------------------------------------------------
+// ble_client.h — Generic BLE Central infrastructure for multi-device
+//                connections with GATT discovery, scan/connect, security
+//                retry logic, and passkey authentication.
+//
+// Usage:
+//   1. Define a BleDeviceConnection array and GattDiscoveryTarget configs.
+//   2. Populate each device's name, scan prefix, target, and callbacks.
+//   3. Call ble_client_init() with the device array, service UUID, and passkey.
+//
+// Requires CONFIG_BT_SECURITY_ERR_TO_STR=y in prj.conf.
+// ---------------------------------------------------------------------------
 #pragma once
 
 #include <myl_utils/zephyr/ble_helper.h>
@@ -6,29 +18,203 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/settings/settings.h>
+#include <zephyr/sys/atomic.h>
 
-struct device_name {
-  bool found;
-  char name[30];
-};
+#include "log.h"
 
-static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
-  char addr[BT_ADDR_LE_STR_LEN];
-
-  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-  if (!err) {
-    printk("Security changed: %s level %u\n", addr, level);
-  } else {
-    printk("Security failed: %s level %u err %d %s\n", addr, level, err, bt_security_err_to_str(err));
-  }
-}
-
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+#define MAX_TRANSIENT_RETRIES 3
 #define NAME_LEN 30
 
-static bool parse_data_name_cb(struct bt_data *data, void *user_data) {
-  device_name *name = (device_name *)user_data;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+enum class DiscoveryAction { SUBSCRIBE_NOTIFY, WRITE_VALUE };
+enum DiscoveryState { DISC_FIND_SERVICE = 0, DISC_FIND_CHAR, DISC_FIND_CCC };
 
+struct BleDeviceConnection;
+
+struct GattDiscoveryTarget {
+  const struct bt_uuid_16 *char_uuid;
+  DiscoveryAction action;
+  bt_gatt_notify_func_t notify_cb;    // used when action == SUBSCRIBE_NOTIFY
+  const uint8_t *write_data;          // used when action == WRITE_VALUE
+  uint16_t write_len;
+  void (*on_complete)(BleDeviceConnection *dev);
+};
+
+struct BleDeviceConnection {
+  const char *name;
+  const char *scan_name_prefix;
+  size_t scan_name_prefix_len;
+
+  struct bt_conn *conn;
+  bool pairing_mode;
+  uint8_t security_fail_count;
+
+  // GATT discovery state
+  struct bt_gatt_discover_params discover_params;
+  struct bt_uuid_16 discover_uuid;
+  struct bt_gatt_subscribe_params subscribe_params;
+  uint16_t char_handle;
+  DiscoveryState disc_state;
+
+  const GattDiscoveryTarget *target;
+
+  // Application-layer callbacks
+  void (*on_connected_cb)(bool connected);
+  void (*on_needs_pairing)();  // called when scan starts and device has no paired addr
+  bool (*set_addr)(const bt_addr_le_t *addr);
+  bt_addr_le_t (*get_addr)();
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+static bool is_credential_failure(enum bt_security_err err) {
+  return (err == BT_SECURITY_ERR_AUTH_FAIL ||
+          err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING ||
+          err == BT_SECURITY_ERR_KEY_REJECTED);
+}
+
+static bool is_valid_paired_addr(const bt_addr_le_t *addr) {
+  if (bt_addr_le_eq(addr, BT_ADDR_LE_NONE)) return false;
+  const uint8_t *val = addr->a.val;
+  return !(val[0] == 0xFF && val[1] == 0xFF && val[2] == 0xFF &&
+           val[3] == 0xFF && val[4] == 0xFF && val[5] == 0xFF);
+}
+
+// ---------------------------------------------------------------------------
+// Global client state — set during ble_client_init()
+// ---------------------------------------------------------------------------
+static BleDeviceConnection *_ble_devices = nullptr;
+static int _ble_device_count = 0;
+static uint32_t _ble_passkey = 0;
+static bt_security_t _ble_security_level = BT_SECURITY_L4;
+static const struct bt_uuid_128 *_ble_service_uuid = nullptr;
+
+static auto _ble_le_create_conn = BT_CONN_LE_CREATE_CONN;
+static auto _ble_le_conn_param = BT_LE_CONN_PARAM_DEFAULT;
+static auto _ble_active_scan = BT_LE_SCAN_ACTIVE;
+static atomic_t _ble_scanning = ATOMIC_INIT(0);
+
+// Forward declarations
+static void ble_start_scan(void);
+static void ble_start_scan_deferred(void);
+
+// ---------------------------------------------------------------------------
+// Device lookup
+// ---------------------------------------------------------------------------
+static BleDeviceConnection *ble_find_device_by_conn(struct bt_conn *conn) {
+  for (int i = 0; i < _ble_device_count; i++) {
+    if (_ble_devices[i].conn == conn) return &_ble_devices[i];
+  }
+  return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Generic GATT discovery state machine
+// ---------------------------------------------------------------------------
+static uint8_t ble_generic_discovery_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                          struct bt_gatt_discover_params *params) {
+  DECLARE_MYL_UTILS_LOG();
+  BleDeviceConnection *dev = nullptr;
+  for (int i = 0; i < _ble_device_count; i++) {
+    if (&_ble_devices[i].discover_params == params) { dev = &_ble_devices[i]; break; }
+  }
+  if (!dev) return BT_GATT_ITER_STOP;
+
+  if (!attr) {
+    LOG_INF("%s: Discovery complete", dev->name);
+    memset(params, 0, sizeof(*params));
+    return BT_GATT_ITER_STOP;
+  }
+
+  int err;
+  switch (dev->disc_state) {
+    case DISC_FIND_SERVICE:
+      LOG_INF("%s: Found primary service", dev->name);
+      dev->discover_params.uuid = (const struct bt_uuid *)dev->target->char_uuid;
+      dev->discover_params.start_handle = attr->handle + 1;
+      dev->discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+      dev->disc_state = DISC_FIND_CHAR;
+      err = bt_gatt_discover(conn, &dev->discover_params);
+      if (err) LOG_INF("%s: Discover char failed (%d)", dev->name, err);
+      break;
+
+    case DISC_FIND_CHAR:
+      LOG_INF("%s: Found characteristic (handle %u)", dev->name, attr->handle);
+      dev->char_handle = attr->handle;
+
+      if (dev->target->action == DiscoveryAction::SUBSCRIBE_NOTIFY) {
+        memcpy(&dev->discover_uuid, BT_UUID_GATT_CCC, sizeof(dev->discover_uuid));
+        dev->discover_params.uuid = &dev->discover_uuid.uuid;
+        dev->discover_params.start_handle = attr->handle + 2;
+        dev->discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+        dev->subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
+        dev->disc_state = DISC_FIND_CCC;
+        err = bt_gatt_discover(conn, &dev->discover_params);
+        if (err) LOG_INF("%s: Discover CCC failed (%d)", dev->name, err);
+      } else {
+        // WRITE_VALUE — send initial data to the characteristic
+        if (dev->target->write_data && dev->target->write_len > 0) {
+          err = bt_gatt_write_without_response(conn, attr->handle,
+                                               dev->target->write_data,
+                                               dev->target->write_len, false);
+          if (err) LOG_INF("%s: Write failed (%d)", dev->name, err);
+          else LOG_INF("%s: Value written", dev->name);
+        }
+        if (dev->target->on_complete) dev->target->on_complete(dev);
+      }
+      break;
+
+    case DISC_FIND_CCC:
+      LOG_INF("%s: Found CCC descriptor", dev->name);
+      dev->subscribe_params.notify = dev->target->notify_cb;
+      dev->subscribe_params.value = BT_GATT_CCC_NOTIFY;
+      dev->subscribe_params.ccc_handle = attr->handle;
+      err = bt_gatt_subscribe(conn, &dev->subscribe_params);
+      if (err && err != -EALREADY) {
+        LOG_INF("%s: Subscribe failed (%d)", dev->name, err);
+      } else {
+        LOG_INF("%s: [SUBSCRIBED]", dev->name);
+        if (dev->target->on_complete) dev->target->on_complete(dev);
+      }
+      break;
+  }
+
+  return BT_GATT_ITER_STOP;
+}
+
+static void ble_start_gatt_discovery(struct bt_conn *conn) {
+  DECLARE_MYL_UTILS_LOG();
+  BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+  if (!dev || !dev->target || !_ble_service_uuid) return;
+
+  dev->discover_params.uuid = &_ble_service_uuid->uuid;
+  dev->discover_params.func = ble_generic_discovery_func;
+  dev->discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
+  dev->discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
+  dev->discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+  dev->disc_state = DISC_FIND_SERVICE;
+
+  int err = bt_gatt_discover(conn, &dev->discover_params);
+  if (err) LOG_INF("%s: Discovery failed (%d)", dev->name, err);
+}
+
+// ---------------------------------------------------------------------------
+// Scan / connect infrastructure
+// ---------------------------------------------------------------------------
+struct device_name {
+  bool found;
+  char name[NAME_LEN];
+};
+
+static bool ble_data_cb(struct bt_data *data, void *user_data) {
+  device_name *name = (device_name *)user_data;
   switch (data->type) {
     case BT_DATA_NAME_SHORTENED:
     case BT_DATA_NAME_COMPLETE:
@@ -40,52 +226,281 @@ static bool parse_data_name_cb(struct bt_data *data, void *user_data) {
   }
 }
 
-static void start_scan(void) {
-  int err;
+static void ble_create_connection(struct bt_conn **conn, const bt_addr_le_t *addr,
+                                  char *addr_str, const char *dev_name) {
+  DECLARE_MYL_UTILS_LOG();
+  if (bt_le_scan_stop()) return;
+  atomic_clear(&_ble_scanning);
 
-  /* This demo doesn't require active scan */
-  err = bt_le_scan_start(activeScan, device_found);
+  int err = bt_conn_le_create(addr, _ble_le_create_conn, _ble_le_conn_param, conn);
   if (err) {
-    printk("Scanning failed to start (err %d)\n", err);
+    LOG_INF("Create %s conn to %s failed (%d)", dev_name, addr_str, err);
+    ble_start_scan_deferred();
+  } else {
+    LOG_INF("Create %s conn to %s succeeded", dev_name, addr_str);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scan callback — generic device matching
+// ---------------------------------------------------------------------------
+static void ble_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
+                             struct net_buf_simple *ad) {
+  DECLARE_MYL_UTILS_LOG();
+  // Check if all devices are already connected
+  bool all_connected = true;
+  for (int i = 0; i < _ble_device_count; i++) {
+    if (!_ble_devices[i].conn) { all_connected = false; break; }
+  }
+  if (all_connected) return;
+
+  if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND &&
+      type != BT_GAP_ADV_TYPE_SCAN_RSP) {
     return;
   }
 
-  printk("Scanning successfully started\n");
-}
+  char addr_str[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
 
-static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey) {
-  char addr[BT_ADDR_LE_STR_LEN];
-
-  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-  printk("Passkey for %s: %06u\n", addr, passkey);
-}
-
-static void auth_cancel(struct bt_conn *conn) {
-  char addr[BT_ADDR_LE_STR_LEN];
-
-  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-  printk("Pairing cancelled: %s\n", addr);
-}
-
-void bt_client_init(const struct bt_conn_auth_cb *conn_auth_callbacks) {
-  int err;
-  if (conn_auth_callbacks) {
-    err = bt_conn_auth_cb_register(conn_auth_callbacks);
-    if (err) {
-      printk("conn auth cb error %d \n", err);
+  // Priority 1: Reconnect to a paired device by address
+  for (int i = 0; i < _ble_device_count; i++) {
+    BleDeviceConnection *dev = &_ble_devices[i];
+    if (dev->conn) continue;
+    bt_addr_le_t paired = dev->get_addr();
+    if (is_valid_paired_addr(&paired) && bt_addr_le_eq(&paired, addr)) {
+      LOG_INF("Reconnecting to paired %s", dev->name);
+      ble_create_connection(&dev->conn, addr, addr_str, dev->name);
       return;
     }
   }
 
-  err = bt_enable(NULL);
-  if (err) {
-    printk("Bluetooth init failed (err %d)\n", err);
+  // Priority 2: Pair a new device by advertised name
+  device_name name{};
+  bt_data_parse(ad, ble_data_cb, &name);
+  if (!name.found) return;
+
+  for (int i = 0; i < _ble_device_count; i++) {
+    BleDeviceConnection *dev = &_ble_devices[i];
+    if (dev->conn) continue;
+    bt_addr_le_t paired = dev->get_addr();
+    if (is_valid_paired_addr(&paired)) continue;
+    if (!dev->pairing_mode) continue;
+    if (!strncmp(dev->scan_name_prefix, name.name, dev->scan_name_prefix_len)) {
+      LOG_INF("Found new %s: %s", dev->name, addr_str);
+      ble_create_connection(&dev->conn, addr, addr_str, dev->name);
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deferred scan restart
+// ---------------------------------------------------------------------------
+static void ble_scan_work_handler(struct k_work *work) {
+  (void)work;
+  ble_start_scan();
+}
+
+K_WORK_DELAYABLE_DEFINE(ble_scan_work, ble_scan_work_handler);
+
+static void ble_start_scan_deferred(void) {
+  DECLARE_MYL_UTILS_LOG();
+  LOG_INF("Deferring scan restart");
+  k_work_reschedule(&ble_scan_work, K_MSEC(200));
+}
+
+static void ble_start_scan(void) {
+  DECLARE_MYL_UTILS_LOG();
+  if (atomic_get(&_ble_scanning)) {
+    LOG_INF("Scan already active");
     return;
   }
 
-  printk("Bluetooth initialized\n");
+  int err = bt_le_scan_start(_ble_active_scan, ble_device_found);
+  if (err) {
+    LOG_INF("Scanning failed to start (%d)", err);
+    return;
+  }
 
-  start_scan();
+  LOG_INF("Scanning started");
+  atomic_set(&_ble_scanning, 1);
+
+  // Notify devices that need pairing attention
+  for (int i = 0; i < _ble_device_count; i++) {
+    BleDeviceConnection *dev = &_ble_devices[i];
+    if (dev->on_needs_pairing) {
+      bt_addr_le_t addr = dev->get_addr();
+      if (!is_valid_paired_addr(&addr) && !dev->pairing_mode) {
+        dev->on_needs_pairing();
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connection callbacks
+// ---------------------------------------------------------------------------
+static void ble_security_changed(struct bt_conn *conn, bt_security_t level,
+                                 enum bt_security_err err) {
+  DECLARE_MYL_UTILS_LOG();
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+  BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+
+  if (!err) {
+    LOG_INF("Security changed: %s level %u", addr, level);
+
+    if (dev) {
+      dev->set_addr(bt_conn_get_dst(conn));
+      dev->pairing_mode = false;
+      dev->security_fail_count = 0;
+    }
+
+    ble_start_gatt_discovery(conn);
+
+    // Continue scanning for remaining devices
+    for (int i = 0; i < _ble_device_count; i++) {
+      if (!_ble_devices[i].conn) { ble_start_scan(); break; }
+    }
+  } else {
+    LOG_INF("Security failed: %s level %u err %d %s", addr, level, err,
+            bt_security_err_to_str(err));
+
+    if (dev) {
+      dev->security_fail_count++;
+
+      if (is_credential_failure(err)) {
+        LOG_INF("%s credential failure (err %d), clearing bond and address",
+                dev->name, err);
+        bt_unpair(BT_ID_DEFAULT, bt_conn_get_dst(conn));
+        dev->set_addr(BT_ADDR_LE_NONE);
+        dev->security_fail_count = 0;
+        dev->pairing_mode = true;
+      } else {
+        LOG_INF("%s transient failure (err %d), retry %d/%d",
+                dev->name, err, dev->security_fail_count, MAX_TRANSIENT_RETRIES);
+
+        if (dev->security_fail_count >= MAX_TRANSIENT_RETRIES) {
+          LOG_INF("%s max transient retries, clearing bond", dev->name);
+          bt_unpair(BT_ID_DEFAULT, bt_conn_get_dst(conn));
+          dev->security_fail_count = 0;
+        }
+      }
+    }
+
+    bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+    ble_start_scan_deferred();
+  }
+}
+
+static void ble_connected(struct bt_conn *conn, uint8_t err) {
+  DECLARE_MYL_UTILS_LOG();
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+  if (err) {
+    LOG_INF("Failed to connect to %s %u %s", addr, err, bt_hci_err_to_str(err));
+    BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+    if (dev) {
+      bt_conn_unref(dev->conn);
+      dev->conn = NULL;
+    }
+    ble_start_scan_deferred();
+    return;
+  }
+
+  LOG_INF("Connected: %s", addr);
+  atomic_clear(&_ble_scanning);
+
+  err = bt_conn_set_security(conn, _ble_security_level);
+  if (err) LOG_INF("Failed to set security (%d)", err);
+}
+
+static void ble_disconnected(struct bt_conn *conn, uint8_t reason) {
+  DECLARE_MYL_UTILS_LOG();
+  BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+  if (!dev) return;
+
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+  LOG_INF("Disconnected: %s, reason 0x%02x %s", addr, reason, bt_hci_err_to_str(reason));
+
+  bt_conn_unref(dev->conn);
+  dev->conn = NULL;
+  dev->char_handle = 0;
+
+  if (dev->on_connected_cb) dev->on_connected_cb(false);
+
+  if (!atomic_get(&_ble_scanning)) ble_start_scan_deferred();
+}
+
+BT_CONN_CB_DEFINE(ble_client_conn_callbacks) = {
+    .connected = ble_connected,
+    .disconnected = ble_disconnected,
+    .security_changed = ble_security_changed,
+};
+
+// ---------------------------------------------------------------------------
+// Authentication callbacks
+// ---------------------------------------------------------------------------
+static void ble_auth_passkey_display(struct bt_conn *conn, unsigned int passkey) {
+  DECLARE_MYL_UTILS_LOG();
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+  LOG_INF("Passkey for %s: %06u", addr, passkey);
+}
+
+static void ble_auth_cancel(struct bt_conn *conn) {
+  DECLARE_MYL_UTILS_LOG();
+  char addr[BT_ADDR_LE_STR_LEN];
+  bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+  LOG_INF("Pairing cancelled: %s", addr);
+}
+
+static void ble_passkey_entry(struct bt_conn *conn) {
+  DECLARE_MYL_UTILS_LOG();
+  BleDeviceConnection *dev = ble_find_device_by_conn(conn);
+  LOG_INF("Passkey entry for %s", dev ? dev->name : "UNKNOWN");
+  int err = bt_conn_auth_passkey_entry(conn, _ble_passkey);
+  if (err) LOG_INF("Passkey Entry Error %d", err);
+}
+
+static struct bt_conn_auth_cb ble_conn_auth_callbacks = {
+    .passkey_display = ble_auth_passkey_display,
+    .passkey_entry = ble_passkey_entry,
+    .cancel = ble_auth_cancel,
+};
+
+// ---------------------------------------------------------------------------
+// Initialization & utility
+// ---------------------------------------------------------------------------
+void ble_client_init(BleDeviceConnection *devices, int device_count,
+                     const struct bt_uuid_128 *service_uuid,
+                     uint32_t passkey,
+                     bt_security_t security_level = BT_SECURITY_L4) {
+  DECLARE_MYL_UTILS_LOG();
+  _ble_devices = devices;
+  _ble_device_count = device_count;
+  _ble_service_uuid = service_uuid;
+  _ble_passkey = passkey;
+  _ble_security_level = security_level;
+
+  int err = bt_conn_auth_cb_register(&ble_conn_auth_callbacks);
+  if (err) { LOG_INF("conn auth cb error %d", err); return; }
+
+  err = bt_enable(NULL);
+  if (err) { LOG_INF("Bluetooth init failed (%d)", err); return; }
+
+  LOG_INF("Bluetooth initialized");
+  settings_load();
+  ble_start_scan();
+}
+
+static void ble_disconnect_device(BleDeviceConnection *dev) {
+  bt_addr_le_t addr = dev->get_addr();
+  bt_unpair(BT_ID_DEFAULT, &addr);
+  if (dev->conn) {
+    bt_conn_disconnect(dev->conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+  }
 }

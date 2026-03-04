@@ -27,13 +27,12 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/atomic.h>
-
+#include <cstdlib>
 #include "log.h"
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-#define MAX_TRANSIENT_RETRIES 3
 #define NAME_LEN 30
 
 // ---------------------------------------------------------------------------
@@ -74,6 +73,10 @@ struct BleDeviceConnection {
   DiscoveryState disc_state;
 
   const GattDiscoveryTarget *target;
+
+  // Deferred-unpair flag — set by ble_disconnect_device, acted on in
+  // ble_disconnected so bt_unpair is never called on an active conn.
+  bool pending_unpair;
 
   // Application-layer callbacks
   void (*on_connected_cb)(bool connected);
@@ -236,6 +239,7 @@ static uint8_t ble_generic_discovery_func(struct bt_conn *conn, const struct bt_
           if (err) LOG_INF("%s: Write failed (%d)", dev->name, err);
           else LOG_INF("%s: Value written", dev->name);
         }
+        if (dev->on_connected_cb) dev->on_connected_cb(true);
         if (dev->target->on_complete) dev->target->on_complete(dev);
       }
       break;
@@ -245,11 +249,18 @@ static uint8_t ble_generic_discovery_func(struct bt_conn *conn, const struct bt_
       dev->subscribe_params.notify = dev->target->notify_cb;
       dev->subscribe_params.value = BT_GATT_CCC_NOTIFY;
       dev->subscribe_params.ccc_handle = attr->handle;
+      // Mark volatile so Zephyr removes the subscription from its
+      // internal list on disconnect instead of keeping it for
+      // auto-resubscription.  Without this flag the subscribe_params
+      // stay in Zephyr's list across reconnections and a stale
+      // (zeroed) notify callback causes a NULL-pointer crash.
+      atomic_set_bit(dev->subscribe_params.flags, BT_GATT_SUBSCRIBE_FLAG_VOLATILE);
       err = bt_gatt_subscribe(conn, &dev->subscribe_params);
       if (err && err != -EALREADY) {
         LOG_INF("%s: Subscribe failed (%d)", dev->name, err);
       } else {
         LOG_INF("%s: [SUBSCRIBED]", dev->name);
+        if (dev->on_connected_cb) dev->on_connected_cb(true);
         if (dev->target->on_complete) dev->target->on_complete(dev);
       }
       break;
@@ -282,6 +293,11 @@ struct device_name {
   char name[NAME_LEN];
 };
 
+struct mfg_info {
+  bool found;
+  bool in_pairing_mode;
+};
+
 static bool ble_data_cb(struct bt_data *data, void *user_data) {
   device_name *name = (device_name *)user_data;
   switch (data->type) {
@@ -295,11 +311,26 @@ static bool ble_data_cb(struct bt_data *data, void *user_data) {
   }
 }
 
+static bool ble_mfg_data_cb(struct bt_data *data, void *user_data) {
+  mfg_info *mfg = (mfg_info *)user_data;
+  if (data->type == BT_DATA_MANUFACTURER_DATA && data->data_len >= 1) {
+    mfg->found = true;
+    mfg->in_pairing_mode = (data->data[0] != 0);
+    return false;
+  }
+  return true;
+}
+
 static void ble_create_connection(struct bt_conn **conn, const bt_addr_le_t *addr,
                                   char *addr_str, const char *dev_name) {
   DECLARE_MYL_UTILS_LOG();
-  if (bt_le_scan_stop()) return;
+  int stop_err = bt_le_scan_stop();
   atomic_clear(&_ble_scanning);
+  if (stop_err) {
+    LOG_INF("Failed to stop scan (%d)", stop_err);
+    ble_start_scan_deferred();
+    return;
+  }
 
   int err = bt_conn_le_create(addr, _ble_le_create_conn, _ble_le_conn_param, conn);
   if (err) {
@@ -346,9 +377,19 @@ static void ble_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type
   }
 
   // Priority 2: Pair a new device by advertised name
+  // bt_data_parse consumes the buffer, so save/restore state between calls.
+  struct net_buf_simple_state ad_state;
+  net_buf_simple_save(ad, &ad_state);
+
   device_name name{};
   bt_data_parse(ad, ble_data_cb, &name);
   if (!name.found) return;
+
+  // Check manufacturer data to see if the peripheral is in pairing mode
+  // (mfg_data[0] != 0 means pairing mode on the server side).
+  net_buf_simple_restore(ad, &ad_state);
+  mfg_info mfg{};
+  bt_data_parse(ad, ble_mfg_data_cb, &mfg);
 
   for (int i = 0; i < _ble_device_count; i++) {
     BleDeviceConnection *dev = &_ble_devices[i];
@@ -356,6 +397,15 @@ static void ble_device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type
     if (is_valid_paired_addr(&dev->paired_addr)) continue;
     if (!dev->pairing_mode) continue;
     if (!strncmp(dev->scan_name_prefix, name.name, dev->scan_name_prefix_len)) {
+      // Only connect for pairing if the peripheral advertises pairing mode.
+      // Both name and mfg_data are in the primary ad, so mfg.found must be
+      // true; if not (e.g. scan-response-only packet), skip this device.
+      if (!mfg.found || !mfg.in_pairing_mode) {
+        if (mfg.found) {
+          LOG_INF("Skipping %s at %s — not in pairing mode", dev->name, addr_str);
+        }
+        continue;
+      }
       LOG_INF("Found new %s: %s", dev->name, addr_str);
       ble_create_connection(&dev->conn, addr, addr_str, dev->name);
       return;
@@ -428,6 +478,11 @@ static void ble_security_changed(struct bt_conn *conn, bt_security_t level,
 
     ble_start_gatt_discovery(conn);
 
+    // If no GATT target, notify connected now (discovery will be skipped)
+    if (dev && !dev->target && dev->on_connected_cb) {
+      dev->on_connected_cb(true);
+    }
+
     // Continue scanning for remaining devices
     for (int i = 0; i < _ble_device_count; i++) {
       if (!_ble_devices[i].conn) { ble_start_scan(); break; }
@@ -442,10 +497,12 @@ static void ble_security_changed(struct bt_conn *conn, bt_security_t level,
       if (is_credential_failure(err)) {
         LOG_INF("%s credential failure (err %d), clearing bond and address",
                 dev->name, err);
-        bt_unpair(BT_ID_DEFAULT, bt_conn_get_dst(conn));
-        ble_clear_device_addr(dev);
+        // Defer unpair to the disconnect callback — calling bt_unpair on
+        // an active connection is unsafe.
+        dev->pending_unpair = true;
         dev->security_fail_count = 0;
         dev->pairing_mode = true;
+        if (dev->on_needs_pairing) dev->on_needs_pairing();
       } else {
         // Transient failure — disconnect and retry, but never unpair.
         // Unpairing here would desync from the server (which still holds
@@ -493,10 +550,30 @@ static void ble_disconnected(struct bt_conn *conn, uint8_t reason) {
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
   LOG_INF("Disconnected: %s, reason 0x%02x %s", addr, reason, bt_hci_err_to_str(reason));
 
+  // If a deferred unpair was requested (via ble_disconnect_device), perform
+  // it now that the connection is fully torn down — avoids the race of
+  // calling bt_unpair on an active connection.
+  if (dev->pending_unpair) {
+    dev->pending_unpair = false;
+    if (is_valid_paired_addr(&dev->paired_addr)) {
+      bt_unpair(BT_ID_DEFAULT, &dev->paired_addr);
+    }
+    ble_clear_device_addr(dev);
+  }
+
   bt_conn_unref(dev->conn);
   dev->conn = NULL;
   dev->char_handle = 0;
   dev->value_handle = 0;
+  memset(&dev->discover_params, 0, sizeof(dev->discover_params));
+  // Do NOT memset subscribe_params here.  Zephyr's internal
+  // subscription list still references this struct until
+  // remove_subscriptions() runs (callback ordering is not
+  // guaranteed).  Zeroing notify/flags while the struct is
+  // still linked causes a NULL-pointer crash when Zephyr
+  // delivers a notification via auto-resubscription on
+  // reconnection.  All fields are re-initialised during GATT
+  // discovery on the next connection.
 
   if (dev->on_connected_cb) dev->on_connected_cb(false);
 
@@ -599,14 +676,16 @@ void ble_client_init(BleDeviceConnection *devices, int device_count,
 }
 
 static void ble_disconnect_device(BleDeviceConnection *dev) {
-  // Disconnect first, then unpair — calling bt_unpair on an active
-  // connection can trigger the disconnected callback synchronously,
-  // leading to double-disconnect and scan restart races.
   if (dev->conn) {
+    // Defer unpair until the disconnected callback fires, so we never
+    // call bt_unpair on an active connection.
+    dev->pending_unpair = true;
     bt_conn_disconnect(dev->conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+  } else {
+    // No active connection — safe to unpair immediately.
+    if (is_valid_paired_addr(&dev->paired_addr)) {
+      bt_unpair(BT_ID_DEFAULT, &dev->paired_addr);
+    }
+    ble_clear_device_addr(dev);
   }
-  if (is_valid_paired_addr(&dev->paired_addr)) {
-    bt_unpair(BT_ID_DEFAULT, &dev->paired_addr);
-  }
-  ble_clear_device_addr(dev);
 }

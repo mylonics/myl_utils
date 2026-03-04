@@ -25,6 +25,8 @@ static struct k_work adv_work;
 static struct k_work pairing_work;
 static bt_addr_le_t paired_addr;
 
+static void advertising_start(void) { k_work_submit(&adv_work); }
+
 static bool isPairingMode(bool set = false, bool value = false) {
   static bool pairing_mode = false;
   if (set) {
@@ -35,6 +37,24 @@ static bool isPairingMode(bool set = false, bool value = false) {
 
 static void pairing_work_handler(struct k_work *work) {
   DECLARE_MYL_UTILS_LOG();
+
+  // Set pairing mode BEFORE disconnecting so any disconnect-triggered
+  // advertising restart already uses pairing-mode parameters.
+  isPairingMode(true, true);
+
+  int err_code = bt_le_adv_stop();
+  if (err_code) {
+    LOG_INF("Cannot stop advertising err= %d", err_code);
+    // Fall through — still continue with unpairing
+  }
+
+  // Disconnect any active connection before unpairing — calling bt_unpair
+  // on an active connection can trigger the disconnected callback
+  // synchronously, leading to double-disconnect and scan restart races.
+  bt_conn_foreach(BT_CONN_TYPE_LE, [](struct bt_conn *conn, void *) {
+    bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+  }, nullptr);
+
   int err = bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY);
   if (err) {
     LOG_INF("Cannot delete bond (err: %d)", err);
@@ -42,12 +62,6 @@ static void pairing_work_handler(struct k_work *work) {
     LOG_INF("Bond deleted succesfully");
   }
 
-  isPairingMode(true, true);
-  int err_code = bt_le_adv_stop();
-  if (err_code) {
-    LOG_INF("Cannot stop advertising err= %d", err_code);
-    // Fall through — still restart advertising in pairing mode
-  }
   advertising_start();
 }
 
@@ -93,7 +107,6 @@ static void adv_work_handler(struct k_work *work) {
     } else {
       LOG_INF("Accept list cleared succesfully");
     }
-    isPairingMode(true, false);
     err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) {
       LOG_INF("Advertising failed to start (err %d)\n", err);
@@ -107,7 +120,9 @@ static void adv_work_handler(struct k_work *work) {
       LOG_INF("Acceptlist setup failed (err:%d)\n", allowed_cnt);
     } else {
       if (allowed_cnt == 0) {
-        LOG_INF("Advertising with no Accept list \n");
+        LOG_INF("No bonds found, entering pairing mode");
+        isPairingMode(true, true);
+        mfg_data[0] = 1;
         err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
       } else {
         LOG_INF("Advertising with Accept list");
@@ -128,8 +143,6 @@ static void adv_work_handler(struct k_work *work) {
   }
 }
 
-static void advertising_start(void) { k_work_submit(&adv_work); }
-
 void pairing_start(void) { k_work_submit(&pairing_work); }
 
 static void connected(struct bt_conn *conn, uint8_t err) {
@@ -138,12 +151,20 @@ static void connected(struct bt_conn *conn, uint8_t err) {
     LOG_INF("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
   } else {
     LOG_INF("Connected\n");
+    int sec_err = bt_conn_set_security(conn, BT_SECURITY_L4);
+    if (sec_err) {
+      LOG_ERR("Failed to set security (err %d)", sec_err);
+    }
   }
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason) {
   DECLARE_MYL_UTILS_LOG();
   LOG_INF("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
+  // Restart advertising immediately on disconnect as a safety net.
+  // recycled() will also restart it after the last bt_conn_unref, but
+  // if any code path leaks the conn ref, this ensures we keep advertising.
+  advertising_start();
 }
 
 static void recycled() { advertising_start(); }
@@ -190,6 +211,9 @@ static void srv_pairing_complete(struct bt_conn *conn, bool bonded) {
   char addr[BT_ADDR_LE_STR_LEN];
   bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
   LOG_INF("Pairing complete: %s, bonded: %d", addr, bonded);
+  if (bonded) {
+    isPairingMode(true, false);
+  }
 }
 
 static void srv_pairing_failed(struct bt_conn *conn, enum bt_security_err reason) {

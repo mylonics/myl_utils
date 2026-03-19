@@ -18,7 +18,8 @@
  * ZephyrSpiDevice spi(spi_dev, &spi_cfg);
  *
  * // Wrap transport with per-device config (chip select, callback)
- * SpiDevice<Spi> sensor(spi, my_cs_func);
+ * ZephyrGpioOutput cs_pin(cs_spec, false);  // CS initially deasserted
+ * SpiDevice<Spi> sensor(spi, &cs_pin);
  *
  * // Create and configure buffers
  * Buffer<16> tx;
@@ -82,7 +83,7 @@ class ZephyrSpiDevice : public Spi {
 
   void ChipSelect(SpiPacket &pkt, bool enable) override {
     if (pkt.chip_select) {
-      pkt.chip_select(enable);
+      pkt.chip_select->Set(enable);
     }
   }
 

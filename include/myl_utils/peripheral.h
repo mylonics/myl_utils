@@ -16,6 +16,7 @@
  */
 
 #include "buffer.h"
+#include "gpio.h"
 #include "myl_utils/noncopyable.h"
 #include <cstdint>
 
@@ -95,7 +96,7 @@ struct SpiPacket {
   Data *tx_data{};               ///< TX buffer (nullptr if unused)
   Data *rx_data{};               ///< RX buffer (nullptr if unused)
   PacketType type{PacketType::Write};
-  void (*chip_select)(bool){};   ///< Optional chip select callback (enable/disable)
+  GpioOutput *chip_select{};     ///< Optional chip select GPIO (active = asserted)
   void (*callback)(Data &){};    ///< Optional completion callback
 
   /// Assign packet type directly: pkt = PacketType::WriteThenRead;
@@ -387,11 +388,11 @@ using AsyncI2c = AsyncPacketSender<I2cPacket>;
 template <class Transport>
 class SpiDevice {
   Transport &transport_;
-  void (*chip_select_)(bool){};
+  GpioOutput *chip_select_{};
   void (*callback_)(Data &){};
 
  public:
-  SpiDevice(Transport &transport, void (*cs)(bool) = nullptr, void (*cb)(Data &) = nullptr)
+  SpiDevice(Transport &transport, GpioOutput *cs = nullptr, void (*cb)(Data &) = nullptr)
       : transport_(transport), chip_select_(cs), callback_(cb) {}
 
   [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {

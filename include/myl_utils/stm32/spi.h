@@ -13,8 +13,11 @@
  * extern SPI_HandleTypeDef hspi1;
  * Stm32SpiDevice spi(&hspi1);
  *
+ * // Chip select pin (configured by CubeMX)
+ * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
+ *
  * // Wrap transport with per-device config (chip select, callback)
- * SpiDevice<Spi> sensor(spi, my_cs_func);
+ * SpiDevice<Spi> sensor(spi, &cs_pin);
  *
  * // Create and configure buffers
  * Buffer<16> tx;
@@ -31,7 +34,8 @@
  * extern SPI_HandleTypeDef hspi1;
  * Stm32AsyncSpiDevice spi(&hspi1);
  *
- * SpiDevice<AsyncSpi> sensor(spi, my_cs_func, my_callback);
+ * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
+ * SpiDevice<AsyncSpi> sensor(spi, &cs_pin, my_callback);
  *
  * SpiPacketBundle<16> cmd;
  * cmd.tx.Set(0x80 | REG_ADDR);
@@ -83,7 +87,7 @@ class Stm32SpiDevice : public Spi {
 
   void ChipSelect(SpiPacket &pkt, bool enable) override {
     if (pkt.chip_select) {
-      pkt.chip_select(enable);
+      pkt.chip_select->Set(enable);
     }
   }
 
@@ -134,7 +138,7 @@ class Stm32AsyncSpiDevice : public AsyncPacketSender<SpiPacket, QueueSize> {
 
   void ChipSelect(SpiPacket &pkt, bool enable) override {
     if (pkt.chip_select) {
-      pkt.chip_select(enable);
+      pkt.chip_select->Set(enable);
     }
   }
 

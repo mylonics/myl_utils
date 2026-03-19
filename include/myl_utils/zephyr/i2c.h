@@ -14,7 +14,7 @@
  * ZephyrI2cDevice i2c(i2c_dev);
  *
  * // Wrap transport with per-device config (address, callback)
- * I2cDevice<I2c> eeprom(i2c, 0x50);
+ * I2cDevice<ZephyrI2cDevice> eeprom(i2c, 0x50);
  *
  * // Create and configure buffers
  * Buffer<16> tx;
@@ -38,10 +38,12 @@
  * @brief Synchronous Zephyr I2C device implementation
  *
  * This class provides synchronous (blocking) I2C communication using Zephyr's
- * I2C driver API. For asynchronous operation, create a subclass that overrides
- * the transfer methods and inherits from AsyncI2c instead.
+ * I2C driver API. For asynchronous operation, create a separate class that
+ * inherits from AsyncI2c<Derived, QueueSize> instead.
  */
-class ZephyrI2cDevice : public I2c {
+class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
+  friend class SyncPacketSender<ZephyrI2cDevice, I2cPacket>;
+
  protected:
   const struct device *dev_;
   int last_error_{};
@@ -52,7 +54,7 @@ class ZephyrI2cDevice : public I2c {
    * @param count Number of messages
    * @param pkt The packet containing the device address
    */
-  virtual void StartTransfer(struct i2c_msg *msgs, uint8_t count, I2cPacket &pkt) {
+  void StartTransfer(struct i2c_msg *msgs, uint8_t count, I2cPacket &pkt) {
     last_error_ = i2c_transfer(dev_, msgs, count, pkt.addr);
   }
 
@@ -63,7 +65,7 @@ class ZephyrI2cDevice : public I2c {
    * (both use a RESTART between write and read phases). There is no true
    * simultaneous full-duplex on I2C.
    */
-  void ReadWritePacket(I2cPacket &pkt) override {
+  void ReadWritePacket(I2cPacket &pkt) {
     struct i2c_msg msgs[2];
     msgs[0].buf = pkt.tx_data->data;
     msgs[0].len = pkt.tx_data->length;
@@ -75,7 +77,7 @@ class ZephyrI2cDevice : public I2c {
     StartTransfer(msgs, 2, pkt);
   }
 
-  void WritePacket(I2cPacket &pkt) override {
+  void WritePacket(I2cPacket &pkt) {
     struct i2c_msg msg;
     msg.buf = pkt.tx_data->data;
     msg.len = pkt.tx_data->length;
@@ -83,7 +85,7 @@ class ZephyrI2cDevice : public I2c {
     StartTransfer(&msg, 1, pkt);
   }
 
-  void ReadPacket(I2cPacket &pkt) override {
+  void ReadPacket(I2cPacket &pkt) {
     struct i2c_msg msg;
     msg.buf = pkt.rx_data->data;
     msg.len = pkt.rx_data->length;
@@ -91,7 +93,7 @@ class ZephyrI2cDevice : public I2c {
     StartTransfer(&msg, 1, pkt);
   }
 
-  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) override {
+  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
     // I2C does not use chip select - addressing is handled via the packet address
   }
 
@@ -100,7 +102,7 @@ class ZephyrI2cDevice : public I2c {
    * @brief Construct a new Zephyr I2C Device
    * @param i2c_dev Pointer to the Zephyr I2C device (from DEVICE_DT_GET)
    */
-  explicit ZephyrI2cDevice(const struct device *i2c_dev) : I2c{}, dev_(i2c_dev) {}
+  explicit ZephyrI2cDevice(const struct device *i2c_dev) : dev_(i2c_dev) {}
 
   /// Get the error code from the last transfer (0 = success)
   int last_error() const { return last_error_; }

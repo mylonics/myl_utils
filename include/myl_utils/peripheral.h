@@ -2,14 +2,13 @@
 
 /**
  * @file peripheral.h
- * @brief Base classes for SPI and I2C peripheral communication
+ * @brief CRTP base classes for SPI and I2C peripheral communication (zero virtual overhead)
  *
- * This module provides abstract base classes for both synchronous and asynchronous
- * SPI/I2C communication. Sensors and other peripherals can use these interfaces
- * to work seamlessly with either sync or async implementations.
+ * This module provides CRTP base classes for both synchronous and asynchronous
+ * SPI/I2C communication. All dispatch is resolved at compile time — no vtables.
  *
  * Usage:
- * 1. Create a transport (e.g., ZephyrSpiDevice, ZephyrI2cDevice)
+ * 1. Create a transport (e.g., ZephyrSpiDevice, Stm32SpiDevice)
  * 2. Wrap it in an SpiDevice/I2cDevice with per-device config (addr, CS, callback)
  * 3. Create Buffer objects and use Set()/Append() to populate TX data
  * 4. Use convenience methods (Write, Read, WriteThenRead) or ProcessCommand()
@@ -23,7 +22,7 @@
 /**
  * @brief Specifies the type of SPI/I2C transfer to perform
  */
-enum class PacketType {
+enum class PacketType : uint8_t {
   Read,          ///< Read-only operation
   Write,         ///< Write-only operation
   WriteAndRead,  ///< Simultaneous write and read (full-duplex for SPI)
@@ -56,13 +55,12 @@ struct Buffer : Data {
   uint8_t storage[Size]{};
   Buffer() : Data(storage) {}
 
-  /// Reset buffer and write bytes, updating length automatically. Zeros remaining storage.
+  /// Reset buffer and write bytes, updating length automatically
   template <typename... Bytes>
   void Set(Bytes... bytes) {
     static_assert(sizeof...(bytes) <= Size, "Too many bytes for buffer");
     uint8_t tmp[] = {static_cast<uint8_t>(bytes)...};
     for (uint16_t i = 0; i < sizeof...(bytes); ++i) storage[i] = tmp[i];
-    for (uint16_t i = sizeof...(bytes); i < Size; ++i) storage[i] = 0;
     length = sizeof...(bytes);
   }
 
@@ -86,21 +84,36 @@ struct Buffer : Data {
 };
 
 /**
+ * @brief SPI clock polarity setting
+ */
+enum class SpiPolarity : uint8_t {
+  Low = 0,   ///< CPOL=0, clock idle low
+  High = 1   ///< CPOL=1, clock idle high
+};
+
+/**
+ * @brief SPI clock phase setting
+ */
+enum class SpiPhase : uint8_t {
+  Leading = 0,   ///< CPHA=0, data sampled on leading (first) clock edge
+  Trailing = 1   ///< CPHA=1, data sampled on trailing (second) clock edge
+};
+
+/**
  * @brief SPI transfer packet containing buffer pointers and transfer configuration
  *
  * Buffers are optional — set only tx_data for write-only, only rx_data for read-only,
- * or both for bidirectional transfers. Per-device fields (chip_select, callback) are
- * typically set automatically by the SpiDevice wrapper.
+ * or both for bidirectional transfers. Per-device fields (chip_select, callback,
+ * polarity, phase) are typically set automatically by the SpiDevice wrapper.
  */
 struct SpiPacket {
   Data *tx_data{};               ///< TX buffer (nullptr if unused)
   Data *rx_data{};               ///< RX buffer (nullptr if unused)
   PacketType type{PacketType::Write};
-  GpioOutput *chip_select{};     ///< Optional chip select GPIO (active = asserted)
+  ChipSelectPin chip_select{};   ///< Optional chip select GPIO (type-erased, no virtual)
   void (*callback)(Data &){};    ///< Optional completion callback
-
-  /// Assign packet type directly: pkt = PacketType::WriteThenRead;
-  SpiPacket &operator=(PacketType t) { type = t; return *this; }
+  SpiPolarity polarity{SpiPolarity::Low};   ///< Clock polarity (set by SpiDevice wrapper)
+  SpiPhase phase{SpiPhase::Leading};        ///< Clock phase (set by SpiDevice wrapper)
 
   /// Factory methods for creating typed packets (avoids fragile aggregate initialization)
   static SpiPacket WriteOnly(Data &tx) { return {&tx, nullptr, PacketType::Write}; }
@@ -122,9 +135,6 @@ struct I2cPacket {
   uint8_t addr{};                ///< I2C device address (set by I2cDevice wrapper)
   PacketType type{PacketType::Write};
   void (*callback)(Data &){};    ///< Optional completion callback
-
-  /// Assign packet type directly: pkt = PacketType::WriteThenRead;
-  I2cPacket &operator=(PacketType t) { type = t; return *this; }
 
   /// Factory methods for creating typed packets (avoids fragile aggregate initialization)
   /// @note No FullDuplex — I2C is half-duplex; use RegRead for register read patterns
@@ -175,51 +185,33 @@ struct I2cPacketBundle {
   SpiPacket name{&name##_tx_, &name##_rx_};
 
 /**
- * @brief Abstract base class for asynchronous packet-based transfers
+ * @brief CRTP base class for asynchronous packet-based transfers
  *
  * Provides queuing functionality for non-blocking transfers. When a transfer
  * completes, call TxRxCmpltCb() from the interrupt handler to process the
  * next queued packet.
  *
+ * Derived classes must implement (as non-virtual methods):
+ *   void ReadWritePacket(DataPacket &pkt)
+ *   void WritePacket(DataPacket &pkt)
+ *   void ReadPacket(DataPacket &pkt)
+ *   void ChipSelect(DataPacket &pkt, bool enable)
+ *
  * @note ISR safety assumes ARM Cortex-M memory model (single-core, strongly-ordered
  *       peripheral writes). The volatile qualifier on busy_ and the circular buffer
  *       indices is sufficient on this architecture without explicit memory barriers.
  *
+ * @tparam Derived The concrete implementation class (CRTP parameter)
  * @tparam DataPacket Either SpiPacket or I2cPacket
- * @tparam QueueSize Maximum number of packets that can be queued (default: 25)
+ * @tparam QueueSize Maximum number of packets that can be queued (must be power of 2, default: 32)
  */
-template <class DataPacket, uint8_t QueueSize = 25>
-class AsyncPacketSender : NonCopyable<AsyncPacketSender<DataPacket, QueueSize>> {
+template <class Derived, class DataPacket, uint8_t QueueSize = 32>
+class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, QueueSize>> {
  protected:
   /// @note Access from both thread and ISR context — volatile is sufficient on ARM Cortex-M
   volatile bool busy_{};
 
   static constexpr bool is_sync = false;
-
-  /**
-   * @brief Perform simultaneous read and write (full-duplex)
-   * @param pkt Packet containing TX and RX data
-   */
-  virtual void ReadWritePacket(DataPacket &pkt) = 0;
-
-  /**
-   * @brief Perform write operation
-   * @param pkt Packet containing TX data
-   */
-  virtual void WritePacket(DataPacket &pkt) = 0;
-
-  /**
-   * @brief Perform read operation
-   * @param pkt Packet containing RX buffer
-   */
-  virtual void ReadPacket(DataPacket &pkt) = 0;
-
-  /**
-   * @brief Control chip select line (SPI only, I2C implementations can leave empty)
-   * @param pkt The current packet
-   * @param enable true to assert CS (active), false to deassert
-   */
-  virtual void ChipSelect(DataPacket &pkt, bool enable) = 0;
 
  public:
   /**
@@ -238,11 +230,11 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<DataPacket, QueueSize>> 
   void TxRxCmpltCb() {
     if (current_command_->type == PacketType::WriteThenRead && write_and_read_pkt_) {
       write_and_read_pkt_ = false;
-      ReadPacket(*current_command_);
+      derived().ReadPacket(*current_command_);
       return;
     }
 
-    ChipSelect(*current_command_, false);
+    derived().ChipSelect(*current_command_, false);
     if (current_command_->callback && current_command_->rx_data) {
       current_command_->callback(*current_command_->rx_data);
     }
@@ -260,6 +252,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<DataPacket, QueueSize>> 
   bool write_and_read_pkt_{};
   DataPacket *current_command_{nullptr};
 
+  Derived &derived() { return static_cast<Derived &>(*this); }
+
   bool QueuePacket(DataPacket &pkt) {
     if (busy_) {
       if (!pkt_queue_.Writable()) return false;
@@ -275,62 +269,45 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<DataPacket, QueueSize>> 
     busy_ = true;
     write_and_read_pkt_ = false;
     current_command_ = &pkt;
-    ChipSelect(pkt, true);
+    derived().ChipSelect(pkt, true);
     switch (pkt.type) {
       case PacketType::Read:
-        ReadPacket(pkt);
+        derived().ReadPacket(pkt);
         break;
       case PacketType::WriteAndRead:
-        ReadWritePacket(pkt);
+        derived().ReadWritePacket(pkt);
         break;
       case PacketType::WriteThenRead:
         write_and_read_pkt_ = true;
-        WritePacket(pkt);
+        derived().WritePacket(pkt);
         break;
       case PacketType::Write:
       default:
-        WritePacket(pkt);
+        derived().WritePacket(pkt);
         break;
     }
   }
 };
 
 /**
- * @brief Abstract base class for synchronous packet-based transfers
+ * @brief CRTP base class for synchronous packet-based transfers
  *
  * Provides blocking transfer functionality. Each call to ProcessCommand()
  * completes the entire transfer before returning.
  *
+ * Derived classes must implement (as non-virtual methods):
+ *   void ReadWritePacket(DataPacket &pkt)
+ *   void WritePacket(DataPacket &pkt)
+ *   void ReadPacket(DataPacket &pkt)
+ *   void ChipSelect(DataPacket &pkt, bool enable)
+ *
+ * @tparam Derived The concrete implementation class (CRTP parameter)
  * @tparam DataPacket Either SpiPacket or I2cPacket
  */
-template <class DataPacket>
-class SyncPacketSender : NonCopyable<SyncPacketSender<DataPacket>> {
+template <class Derived, class DataPacket>
+class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
  protected:
   static constexpr bool is_sync = true;
-  /**
-   * @brief Perform simultaneous read and write (full-duplex)
-   * @param pkt Packet containing TX and RX data
-   */
-  virtual void ReadWritePacket(DataPacket &pkt) = 0;
-
-  /**
-   * @brief Perform write operation
-   * @param pkt Packet containing TX data
-   */
-  virtual void WritePacket(DataPacket &pkt) = 0;
-
-  /**
-   * @brief Perform read operation
-   * @param pkt Packet containing RX buffer
-   */
-  virtual void ReadPacket(DataPacket &pkt) = 0;
-
-  /**
-   * @brief Control chip select line (SPI only, I2C implementations can leave empty)
-   * @param pkt The current packet
-   * @param enable true to assert CS (active), false to deassert
-   */
-  virtual void ChipSelect(DataPacket &pkt, bool enable) = 0;
 
  public:
   /**
@@ -344,36 +321,45 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<DataPacket>> {
   }
 
  private:
+  Derived &derived() { return static_cast<Derived &>(*this); }
+
   void SendPacket(DataPacket &pkt) {
-    ChipSelect(pkt, true);
+    derived().ChipSelect(pkt, true);
     switch (pkt.type) {
       case PacketType::Read:
-        ReadPacket(pkt);
+        derived().ReadPacket(pkt);
         break;
       case PacketType::WriteAndRead:
-        ReadWritePacket(pkt);
+        derived().ReadWritePacket(pkt);
         break;
       case PacketType::WriteThenRead:
-        WritePacket(pkt);
-        ReadPacket(pkt);
+        derived().WritePacket(pkt);
+        derived().ReadPacket(pkt);
         break;
       case PacketType::Write:
       default:
-        WritePacket(pkt);
+        derived().WritePacket(pkt);
         break;
     }
-    ChipSelect(pkt, false);
+    derived().ChipSelect(pkt, false);
   }
 };
 
-/// Synchronous SPI device base class
-using Spi = SyncPacketSender<SpiPacket>;
-/// Synchronous I2C device base class
-using I2c = SyncPacketSender<I2cPacket>;
-/// Asynchronous SPI device base class
-using AsyncSpi = AsyncPacketSender<SpiPacket>;
-/// Asynchronous I2C device base class
-using AsyncI2c = AsyncPacketSender<I2cPacket>;
+/// Synchronous SPI device CRTP base — usage: class MySpi : public Spi<MySpi> { ... };
+template <typename Derived>
+using Spi = SyncPacketSender<Derived, SpiPacket>;
+
+/// Synchronous I2C device CRTP base — usage: class MyI2c : public I2c<MyI2c> { ... };
+template <typename Derived>
+using I2c = SyncPacketSender<Derived, I2cPacket>;
+
+/// Asynchronous SPI device CRTP base — usage: class MySpi : public AsyncSpi<MySpi> { ... };
+template <typename Derived, uint8_t QueueSize = 32>
+using AsyncSpi = AsyncPacketSender<Derived, SpiPacket, QueueSize>;
+
+/// Asynchronous I2C device CRTP base — usage: class MyI2c : public AsyncI2c<MyI2c> { ... };
+template <typename Derived, uint8_t QueueSize = 32>
+using AsyncI2c = AsyncPacketSender<Derived, I2cPacket, QueueSize>;
 
 /**
  * @brief SPI peripheral device wrapper
@@ -383,20 +369,38 @@ using AsyncI2c = AsyncPacketSender<I2cPacket>;
  * packet before sending, so device-specific settings are set once in the
  * constructor rather than repeated on every transfer.
  *
- * @tparam Transport SPI transport type (Spi or AsyncSpi)
+ * @tparam Transport SPI transport type (concrete class inheriting Spi<> or AsyncSpi<>)
  */
 template <class Transport>
 class SpiDevice {
   Transport &transport_;
-  GpioOutput *chip_select_{};
+  ChipSelectPin chip_select_{};
   void (*callback_)(Data &){};
+  SpiPolarity polarity_{SpiPolarity::Low};
+  SpiPhase phase_{SpiPhase::Leading};
 
  public:
-  SpiDevice(Transport &transport, GpioOutput *cs = nullptr, void (*cb)(Data &) = nullptr)
-      : transport_(transport), chip_select_(cs), callback_(cb) {}
+  /// Construct without chip select
+  explicit SpiDevice(Transport &transport, void (*cb)(Data &) = nullptr,
+                     SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
+      : transport_(transport), callback_(cb), polarity_(pol), phase_(pha) {}
+
+  /// Construct with chip select (any GPIO type that has Set(bool))
+  template <typename Gpio>
+  SpiDevice(Transport &transport, Gpio &cs, void (*cb)(Data &) = nullptr,
+            SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
+      : transport_(transport), chip_select_(cs), callback_(cb), polarity_(pol), phase_(pha) {}
+
+  /// Set SPI clock polarity and phase
+  void SetSpiMode(SpiPolarity pol, SpiPhase pha) {
+    polarity_ = pol;
+    phase_ = pha;
+  }
 
   [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {
     pkt.chip_select = chip_select_;
+    pkt.polarity = polarity_;
+    pkt.phase = phase_;
     if (!pkt.callback) pkt.callback = callback_;
     return transport_.ProcessCommand(pkt);
   }
@@ -432,6 +436,10 @@ class SpiDevice {
     pkt.type = PacketType::WriteThenRead;
     ProcessCommand(pkt);
   }
+
+  /// Access the underlying transport (e.g., to check last_status() / last_error())
+  Transport &transport() { return transport_; }
+  const Transport &transport() const { return transport_; }
 };
 
 /**
@@ -445,7 +453,7 @@ class SpiDevice {
  * @note No WriteAndRead() convenience method — I2C is half-duplex.
  *       Use WriteThenRead() for register read patterns.
  *
- * @tparam Transport I2C transport type (I2c or AsyncI2c)
+ * @tparam Transport I2C transport type (concrete class inheriting I2c<> or AsyncI2c<>)
  */
 template <class Transport>
 class I2cDevice {
@@ -486,4 +494,8 @@ class I2cDevice {
     pkt.type = PacketType::WriteThenRead;
     ProcessCommand(pkt);
   }
+
+  /// Access the underlying transport (e.g., to check last_status() / last_error())
+  Transport &transport() { return transport_; }
+  const Transport &transport() const { return transport_; }
 };

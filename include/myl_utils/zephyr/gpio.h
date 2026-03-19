@@ -20,7 +20,7 @@
  * static const struct gpio_dt_spec btn_spec = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
  * ZephyrGpioInterrupt button(btn_spec);
  * bool pressed = button.Read();
- * button.EnableInterrupt(GpioInterrupt::Edge::Falling, my_handler);
+ * button.EnableInterrupt(ZephyrGpioInterrupt::Edge::Falling, my_handler);
  * @endcode
  */
 
@@ -32,9 +32,9 @@
  *
  * Wraps a gpio_dt_spec and configures the pin as an output on construction.
  */
-class ZephyrGpioOutput : public GpioOutput {
+class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput> {
  protected:
-  const struct gpio_dt_spec &spec_;
+  const struct gpio_dt_spec spec_;
 
  public:
   /**
@@ -47,11 +47,11 @@ class ZephyrGpioOutput : public GpioOutput {
     gpio_pin_configure_dt(&spec_, initial_state ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
   }
 
-  void Set(bool state) override {
+  void Set(bool state) {
     gpio_pin_set_dt(&spec_, state);
   }
 
-  void Toggle() override {
+  void Toggle() {
     gpio_pin_toggle_dt(&spec_);
   }
 };
@@ -61,9 +61,9 @@ class ZephyrGpioOutput : public GpioOutput {
  *
  * Wraps a gpio_dt_spec and configures the pin as an input on construction.
  */
-class ZephyrGpioInput : public GpioInput {
+class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput> {
  protected:
-  const struct gpio_dt_spec &spec_;
+  const struct gpio_dt_spec spec_;
 
  public:
   /**
@@ -75,7 +75,7 @@ class ZephyrGpioInput : public GpioInput {
     gpio_pin_configure_dt(&spec_, GPIO_INPUT);
   }
 
-  bool Read() override {
+  bool Read() {
     return gpio_pin_get_dt(&spec_) != 0;
   }
 };
@@ -86,9 +86,9 @@ class ZephyrGpioInput : public GpioInput {
  * Configured as output by default. Read() returns the current driven/sensed level.
  * Useful for open-drain pins or pins that need both read and write access.
  */
-class ZephyrGpioPin : public GpioPin {
+class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin> {
  protected:
-  const struct gpio_dt_spec &spec_;
+  const struct gpio_dt_spec spec_;
 
  public:
   /**
@@ -102,15 +102,15 @@ class ZephyrGpioPin : public GpioPin {
         (initial_state ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE) | GPIO_INPUT);
   }
 
-  void Set(bool state) override {
+  void Set(bool state) {
     gpio_pin_set_dt(&spec_, state);
   }
 
-  void Toggle() override {
+  void Toggle() {
     gpio_pin_toggle_dt(&spec_);
   }
 
-  bool Read() override {
+  bool Read() {
     return gpio_pin_get_dt(&spec_) != 0;
   }
 };
@@ -122,9 +122,9 @@ class ZephyrGpioPin : public GpioPin {
  * The user-supplied callback is stored and invoked from the Zephyr GPIO
  * ISR via a static trampoline.
  */
-class ZephyrGpioInterrupt : public GpioInterrupt {
+class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt> {
  protected:
-  const struct gpio_dt_spec &spec_;
+  const struct gpio_dt_spec spec_;
   struct gpio_callback cb_data_{};
   void (*user_callback_)(){};
 
@@ -137,6 +137,8 @@ class ZephyrGpioInterrupt : public GpioInterrupt {
   }
 
  public:
+  using Edge = GpioInterruptBase<ZephyrGpioInterrupt>::Edge;
+
   /**
    * @brief Construct and configure an interrupt-capable GPIO input
    * @param spec Devicetree GPIO spec (from GPIO_DT_SPEC_GET)
@@ -146,11 +148,11 @@ class ZephyrGpioInterrupt : public GpioInterrupt {
     gpio_pin_configure_dt(&spec_, GPIO_INPUT);
   }
 
-  bool Read() override {
+  bool Read() {
     return gpio_pin_get_dt(&spec_) != 0;
   }
 
-  bool EnableInterrupt(Edge edge, void (*callback)()) override {
+  bool EnableInterrupt(Edge edge, void (*callback)()) {
     user_callback_ = callback;
 
     gpio_flags_t zephyr_edge{};
@@ -168,7 +170,7 @@ class ZephyrGpioInterrupt : public GpioInterrupt {
     return true;
   }
 
-  void DisableInterrupt() override {
+  void DisableInterrupt() {
     gpio_pin_interrupt_configure_dt(&spec_, GPIO_INT_DISABLE);
     gpio_remove_callback(spec_.port, &cb_data_);
     user_callback_ = nullptr;

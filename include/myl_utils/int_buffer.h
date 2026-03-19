@@ -2,22 +2,24 @@
 
 #include <string.h>
 
-#include <functional>
-
 #include "buffer.h"
 #include "myl_utils/noncopyable.h"
 
 template <class T, size_t size>
 class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
+  static_assert((size & (size - 1)) == 0, "InterruptTxBuffer size must be a power of 2");
+  static constexpr size_t mask_ = size - 1;
+
  public:
-  InterruptTxBuffer(std::function<void(T *, size_t)> transmit_function) : transmit_function_(transmit_function) {}
+  explicit InterruptTxBuffer(void (*transmit_function)(T *, size_t))
+      : transmit_function_(transmit_function) {}
 
   void Put(T item) {
     loading_ = true;
     __DSB();
     buf_[wloc_] = item;
     __DSB();
-    wloc_ = (wloc_ + 1) % (size);
+    wloc_ = (wloc_ + 1) & mask_;
     loading_ = false;
     if (!transmitting_) {
       StartTransfer();
@@ -44,7 +46,7 @@ class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
   T buf_[size];
   T transmitbuf_[size];
 
-  std::function<void(T *, size_t)> transmit_function_;
+  void (*transmit_function_)(T *, size_t);
 
   volatile size_t wloc_{};
   bool transmitting_{};
@@ -54,7 +56,8 @@ class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
 template <class T, size_t size>
 class InterruptRxCircularBuffer {
  public:
-  InterruptRxCircularBuffer(std::function<void(T *)> enable_rx_interrupt) : enable_rx_interrupt_(enable_rx_interrupt) {}
+  explicit InterruptRxCircularBuffer(void (*enable_rx_interrupt)(T *))
+      : enable_rx_interrupt_(enable_rx_interrupt) {}
 
   void Start() { Prime(); }
 
@@ -75,13 +78,16 @@ class InterruptRxCircularBuffer {
 
   void Prime() { enable_rx_interrupt_(&incoming_byte_); }
 
-  std::function<void(T *)> enable_rx_interrupt_;
+  void (*enable_rx_interrupt_)(T *);
 };
 
 template <class T, size_t size>
 class DmaRxCircularBuffer {
+  static_assert((size & (size - 1)) == 0, "DmaRxCircularBuffer size must be a power of 2");
+  static constexpr size_t mask_ = size - 1;
+
  public:
-  DmaRxCircularBuffer(std::function<void(T *)> start_dma_receive, std::function<size_t()> get_write_loc)
+  DmaRxCircularBuffer(void (*start_dma_receive)(T *), size_t (*get_write_loc)())
       : start_dma_receive_(start_dma_receive), get_write_loc_(get_write_loc) {}
 
   void Start() { start_dma_receive_(buf_); }
@@ -89,7 +95,7 @@ class DmaRxCircularBuffer {
   T Get() {
     T item = buf_[rloc_];
     __DSB();
-    rloc_ = (rloc_ + 1) % (size);
+    rloc_ = (rloc_ + 1) & mask_;
     return item;
   }
 
@@ -107,6 +113,6 @@ class DmaRxCircularBuffer {
   size_t rloc_;
   size_t wloc_;
 
-  std::function<void(T *b)> start_dma_receive_;
-  std::function<size_t()> get_write_loc_;
+  void (*start_dma_receive_)(T *);
+  size_t (*get_write_loc_)();
 };

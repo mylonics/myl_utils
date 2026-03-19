@@ -19,7 +19,7 @@
  *
  * // Wrap transport with per-device config (chip select, callback)
  * ZephyrGpioOutput cs_pin(cs_spec, false);  // CS initially deasserted
- * SpiDevice<Spi> sensor(spi, &cs_pin);
+ * SpiDevice<ZephyrSpiDevice> sensor(spi, cs_pin);
  *
  * // Create and configure buffers
  * Buffer<16> tx;
@@ -43,13 +43,15 @@
  * @brief Synchronous Zephyr SPI device implementation
  *
  * This class provides synchronous (blocking) SPI communication using Zephyr's
- * SPI driver API. For asynchronous operation, create a subclass that overrides
- * the transfer methods and inherits from AsyncSpi instead.
+ * SPI driver API. For asynchronous operation, create a separate class that
+ * inherits from AsyncSpi<Derived, QueueSize> instead.
  */
-class ZephyrSpiDevice : public Spi {
+class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
+  friend class SyncPacketSender<ZephyrSpiDevice, SpiPacket>;
+
  protected:
   const struct device *dev_;
-  const struct spi_config *config_;
+  struct spi_config config_;
   int last_error_{};
 
   /**
@@ -58,10 +60,10 @@ class ZephyrSpiDevice : public Spi {
    * @param rx Pointer to RX buffer set (nullptr for write-only)
    */
   void StartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
-    last_error_ = spi_transceive(dev_, config_, tx, rx);
+    last_error_ = spi_transceive(dev_, &config_, tx, rx);
   }
 
-  void ReadWritePacket(SpiPacket &pkt) override {
+  void ReadWritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
@@ -69,33 +71,51 @@ class ZephyrSpiDevice : public Spi {
     StartTransfer(&tx_set, &rx_set);
   }
 
-  void WritePacket(SpiPacket &pkt) override {
+  void WritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
     StartTransfer(&tx_set, nullptr);
   }
 
-  void ReadPacket(SpiPacket &pkt) override {
+  void ReadPacket(SpiPacket &pkt) {
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set rx_set = {&rx_buf, 1};
     StartTransfer(nullptr, &rx_set);
   }
 
-  void ChipSelect(SpiPacket &pkt, bool enable) override {
-    if (pkt.chip_select) {
-      pkt.chip_select->Set(enable);
+  void ChipSelect(SpiPacket &pkt, bool enable) {
+    if (enable) {
+      uint16_t new_op = config_.operation;
+      if (pkt.polarity == SpiPolarity::High) {
+        new_op |= SPI_MODE_CPOL;
+      } else {
+        new_op &= ~SPI_MODE_CPOL;
+      }
+      if (pkt.phase == SpiPhase::Trailing) {
+        new_op |= SPI_MODE_CPHA;
+      } else {
+        new_op &= ~SPI_MODE_CPHA;
+      }
+      if (new_op != config_.operation) {
+        config_.operation = new_op;
+      }
     }
+    pkt.chip_select.Set(enable);
   }
 
  public:
   /**
    * @brief Construct a new Zephyr SPI Device
    * @param spi_dev Pointer to the Zephyr SPI device (from DEVICE_DT_GET)
-   * @param spi_config Pointer to the SPI configuration structure
+   * @param spi_config Pointer to the SPI configuration structure (copied internally)
    */
   ZephyrSpiDevice(const struct device *spi_dev, const struct spi_config *spi_config)
-      : Spi{}, dev_(spi_dev), config_(spi_config) {}
+      : dev_(spi_dev), config_(*spi_config) {}
 
   /// Get the error code from the last transfer (0 = success)
   int last_error() const { return last_error_; }
+
+  /// Access the mutable SPI config (e.g., to change frequency at runtime)
+  struct spi_config &config() { return config_; }
+  const struct spi_config &config() const { return config_; }
 };

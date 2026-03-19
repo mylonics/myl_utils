@@ -24,4 +24,14 @@ class NonCopyable {
    * a NonCopyable will fail at compile time.
    */
   NonCopyable &operator=(const NonCopyable &) = delete;
+
+  /**
+   * Define move constructor as deleted. Hardware handles cannot be moved.
+   */
+  NonCopyable(NonCopyable &&) = delete;
+
+  /**
+   * Define move assignment operator as deleted. Hardware handles cannot be moved.
+   */
+  NonCopyable &operator=(NonCopyable &&) = delete;
 };

@@ -30,9 +30,9 @@
  * Wraps a pwm_dt_spec. The devicetree-defined period is used as the
  * default when SetDutyPercent() is called without an explicit period.
  */
-class ZephyrPwmOutput : public PwmOutput {
+class ZephyrPwmOutput : public PwmOutputBase<ZephyrPwmOutput> {
  protected:
-  const struct pwm_dt_spec &spec_;
+  const struct pwm_dt_spec spec_;
   uint32_t current_period_ns_;  ///< Cached period in nanoseconds
 
  public:
@@ -43,19 +43,19 @@ class ZephyrPwmOutput : public PwmOutput {
   explicit ZephyrPwmOutput(const struct pwm_dt_spec &spec)
       : spec_(spec), current_period_ns_(spec.period) {}
 
-  bool SetDutyCycle(uint32_t pulse, uint32_t period) override {
+  bool SetDutyCycle(uint32_t pulse, uint32_t period) {
     current_period_ns_ = period;
     return pwm_set_dt(&spec_, period, pulse) == 0;
   }
 
-  bool SetPeriodAndDuty(uint32_t period_us, uint32_t pulse_us) override {
+  bool SetPeriodAndDuty(uint32_t period_us, uint32_t pulse_us) {
     uint32_t period_ns = period_us * 1000U;
     uint32_t pulse_ns = pulse_us * 1000U;
     current_period_ns_ = period_ns;
     return pwm_set_dt(&spec_, period_ns, pulse_ns) == 0;
   }
 
-  bool SetDutyPercent(uint8_t percent, uint32_t period_us = 0) override {
+  bool SetDutyPercent(uint8_t percent, uint32_t period_us = 0) {
     if (percent > 100) percent = 100;
     if (period_us > 0) {
       current_period_ns_ = period_us * 1000U;
@@ -64,7 +64,7 @@ class ZephyrPwmOutput : public PwmOutput {
     return pwm_set_dt(&spec_, current_period_ns_, pulse_ns) == 0;
   }
 
-  void Stop() override {
+  void Stop() {
     pwm_set_dt(&spec_, current_period_ns_, 0);
   }
 

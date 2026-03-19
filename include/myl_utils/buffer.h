@@ -5,17 +5,20 @@
 
 template <class T, size_t size>
 class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {
+  static_assert((size & (size - 1)) == 0, "CircularBuffer size must be a power of 2");
+  static constexpr size_t mask_ = size - 1;
+
  public:
   void Put(T item) {
     buf_[wloc_] = item;
     //__DSB();
-    wloc_ = (wloc_ + 1) % (size);
+    wloc_ = (wloc_ + 1) & mask_;
   }
 
   T Get() {
     T item = buf_[rloc_];
     //__DSB();
-    rloc_ = (rloc_ + 1) % (size);
+    rloc_ = (rloc_ + 1) & mask_;
     return item;
   }
 
@@ -26,7 +29,7 @@ class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {
 
   bool Readable() { return wloc_ != rloc_; }
 
-  bool Writable() { return ((wloc_ + 1) % size) != rloc_; }
+  bool Writable() { return ((wloc_ + 1) & mask_) != rloc_; }
 
  private:
   T buf_[size];

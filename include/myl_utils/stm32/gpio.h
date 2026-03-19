@@ -39,7 +39,7 @@
 /**
  * @brief STM32 HAL GPIO output pin
  */
-class Stm32GpioOutput : public GpioOutput {
+class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
@@ -54,11 +54,11 @@ class Stm32GpioOutput : public GpioOutput {
   Stm32GpioOutput(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  void Set(bool state) override {
+  void Set(bool state) {
     HAL_GPIO_WritePin(port_, pin_, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
   }
 
-  void Toggle() override {
+  void Toggle() {
     HAL_GPIO_TogglePin(port_, pin_);
   }
 };
@@ -66,7 +66,7 @@ class Stm32GpioOutput : public GpioOutput {
 /**
  * @brief STM32 HAL GPIO input pin
  */
-class Stm32GpioInput : public GpioInput {
+class Stm32GpioInput : public GpioInputBase<Stm32GpioInput> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
@@ -81,7 +81,7 @@ class Stm32GpioInput : public GpioInput {
   Stm32GpioInput(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  bool Read() override {
+  bool Read() {
     return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET;
   }
 };
@@ -92,7 +92,7 @@ class Stm32GpioInput : public GpioInput {
  * Reads the current pin state via the input data register even when
  * configured as an output. Useful for open-drain pins.
  */
-class Stm32GpioPin : public GpioPin {
+class Stm32GpioPin : public GpioPinBase<Stm32GpioPin> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
@@ -107,15 +107,15 @@ class Stm32GpioPin : public GpioPin {
   Stm32GpioPin(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  void Set(bool state) override {
+  void Set(bool state) {
     HAL_GPIO_WritePin(port_, pin_, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
   }
 
-  void Toggle() override {
+  void Toggle() {
     HAL_GPIO_TogglePin(port_, pin_);
   }
 
-  bool Read() override {
+  bool Read() {
     return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET;
   }
 };
@@ -135,7 +135,7 @@ class Stm32GpioPin : public GpioPin {
  * }
  * @endcode
  */
-class Stm32GpioInterrupt : public GpioInterrupt {
+class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
@@ -145,12 +145,12 @@ class Stm32GpioInterrupt : public GpioInterrupt {
 
   /// Convert pin mask (GPIO_PIN_x) to index (0–15)
   static uint8_t PinIndex(uint16_t pin) {
-    uint8_t idx = 0;
-    while (pin >>= 1) ++idx;
-    return idx;
+    return static_cast<uint8_t>(__builtin_ctz(pin));
   }
 
  public:
+  using Edge = GpioInterruptBase<Stm32GpioInterrupt>::Edge;
+
   /**
    * @brief Construct an interrupt-capable GPIO input wrapper
    * @param port GPIO port (e.g. GPIOA)
@@ -160,18 +160,18 @@ class Stm32GpioInterrupt : public GpioInterrupt {
   Stm32GpioInterrupt(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  bool Read() override {
+  bool Read() {
     return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET;
   }
 
-  bool EnableInterrupt(Edge /*edge*/, void (*callback)()) override {
+  bool EnableInterrupt(Edge /*edge*/, void (*callback)()) {
     // Edge configuration is handled by CubeMX / HAL_GPIO_Init.
     // We just register the callback here.
     callbacks_[PinIndex(pin_)] = callback;
     return true;
   }
 
-  void DisableInterrupt() override {
+  void DisableInterrupt() {
     callbacks_[PinIndex(pin_)] = nullptr;
   }
 

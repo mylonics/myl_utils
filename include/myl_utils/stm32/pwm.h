@@ -40,21 +40,22 @@
  * The timer prescaler and clock source must be configured by CubeMX.
  * This class manipulates ARR and CCR registers directly for period/duty changes.
  */
-class Stm32PwmOutput : public PwmOutput {
+class Stm32PwmOutput : public PwmOutputBase<Stm32PwmOutput> {
  protected:
   TIM_HandleTypeDef *htim_;
   uint32_t channel_;
   uint32_t timer_clock_mhz_;  ///< Timer input clock in MHz (after prescaler)
+  volatile uint32_t *ccr_;    ///< Cached pointer to the CCR register (resolved once at construction)
   bool running_{};
 
-  /// Get pointer to the CCR register for the configured channel
-  volatile uint32_t *CcrRegister() const {
-    switch (channel_) {
-      case TIM_CHANNEL_1: return &htim_->Instance->CCR1;
-      case TIM_CHANNEL_2: return &htim_->Instance->CCR2;
-      case TIM_CHANNEL_3: return &htim_->Instance->CCR3;
-      case TIM_CHANNEL_4: return &htim_->Instance->CCR4;
-      default: return &htim_->Instance->CCR1;
+  /// Resolve CCR register pointer from channel (called once at construction)
+  static volatile uint32_t *ResolveCcr(TIM_HandleTypeDef *htim, uint32_t channel) {
+    switch (channel) {
+      case TIM_CHANNEL_1: return &htim->Instance->CCR1;
+      case TIM_CHANNEL_2: return &htim->Instance->CCR2;
+      case TIM_CHANNEL_3: return &htim->Instance->CCR3;
+      case TIM_CHANNEL_4: return &htim->Instance->CCR4;
+      default: return &htim->Instance->CCR1;
     }
   }
 
@@ -68,7 +69,8 @@ class Stm32PwmOutput : public PwmOutput {
    *        Used to convert microseconds to timer ticks. Default: 1 MHz (1 tick = 1 µs).
    */
   Stm32PwmOutput(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t timer_clock_mhz = 1)
-      : htim_(htim), channel_(channel), timer_clock_mhz_(timer_clock_mhz) {}
+      : htim_(htim), channel_(channel), timer_clock_mhz_(timer_clock_mhz),
+        ccr_(ResolveCcr(htim, channel)) {}
 
   /**
    * @brief Start PWM output
@@ -79,32 +81,32 @@ class Stm32PwmOutput : public PwmOutput {
     return running_;
   }
 
-  bool SetDutyCycle(uint32_t pulse, uint32_t period) override {
+  bool SetDutyCycle(uint32_t pulse, uint32_t period) {
     htim_->Instance->ARR = period - 1;
-    *CcrRegister() = pulse;
+    *ccr_ = pulse;
     return true;
   }
 
-  bool SetPeriodAndDuty(uint32_t period_us, uint32_t pulse_us) override {
+  bool SetPeriodAndDuty(uint32_t period_us, uint32_t pulse_us) {
     uint32_t period_ticks = period_us * timer_clock_mhz_;
     uint32_t pulse_ticks = pulse_us * timer_clock_mhz_;
     htim_->Instance->ARR = period_ticks - 1;
-    *CcrRegister() = pulse_ticks;
+    *ccr_ = pulse_ticks;
     return true;
   }
 
-  bool SetDutyPercent(uint8_t percent, uint32_t period_us = 0) override {
+  bool SetDutyPercent(uint8_t percent, uint32_t period_us = 0) {
     if (percent > 100) percent = 100;
     if (period_us > 0) {
       uint32_t period_ticks = period_us * timer_clock_mhz_;
       htim_->Instance->ARR = period_ticks - 1;
     }
     uint32_t arr = htim_->Instance->ARR + 1;
-    *CcrRegister() = (arr * percent) / 100U;
+    *ccr_ = (arr * percent) / 100U;
     return true;
   }
 
-  void Stop() override {
+  void Stop() {
     HAL_TIM_PWM_Stop(htim_, channel_);
     running_ = false;
   }
@@ -113,7 +115,7 @@ class Stm32PwmOutput : public PwmOutput {
   bool IsRunning() const { return running_; }
 
   /// Direct access to set the CCR (compare) value in raw timer ticks
-  void SetCompareTicks(uint32_t ticks) { *CcrRegister() = ticks; }
+  void SetCompareTicks(uint32_t ticks) { *ccr_ = ticks; }
 
   /// Direct access to set ARR (auto-reload) value in raw timer ticks
   void SetPeriodTicks(uint32_t ticks) { htim_->Instance->ARR = ticks - 1; }

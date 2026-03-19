@@ -18,7 +18,7 @@
  * Stm32I2cDevice i2c(&hi2c1);
  *
  * // Wrap transport with per-device config (address, callback)
- * I2cDevice<I2c> eeprom(i2c, 0x50);
+ * I2cDevice<Stm32I2cDevice> eeprom(i2c, 0x50);
  *
  * // Create and configure buffers
  * Buffer<16> tx;
@@ -35,12 +35,12 @@
  * extern I2C_HandleTypeDef hi2c1;
  * Stm32AsyncI2cDevice i2c(&hi2c1);
  *
- * I2cDevice<AsyncI2c> eeprom(i2c, 0x50, my_callback);
+ * I2cDevice<Stm32AsyncI2cDevice<>> eeprom(i2c, 0x50, my_callback);
  *
  * I2cPacketBundle<16> cmd;
  * cmd.tx.Set(0x00);
  * cmd.rx.length = 8;
- * cmd.pkt = PacketType::WriteThenRead;
+ * cmd.pkt.type = PacketType::WriteThenRead;
  * eeprom.ProcessCommand(cmd.pkt);
  *
  * // In your HAL callbacks (HAL_I2C_MasterTxCpltCallback, etc.):
@@ -64,7 +64,9 @@
  * HAL_I2C_Mem_Read for blocking transfers. Timeout is configurable
  * via the constructor.
  */
-class Stm32I2cDevice : public I2c {
+class Stm32I2cDevice : public I2c<Stm32I2cDevice> {
+  friend class SyncPacketSender<Stm32I2cDevice, I2cPacket>;
+
  protected:
   I2C_HandleTypeDef *hi2c_;
   uint32_t timeout_;
@@ -83,7 +85,7 @@ class Stm32I2cDevice : public I2c {
    * Falls back to separate Transmit + Receive when TX length > 2 bytes
    * (exceeds HAL_I2C_Mem_Read's MemAddSize).
    */
-  void ReadWritePacket(I2cPacket &pkt) override {
+  void ReadWritePacket(I2cPacket &pkt) {
     uint16_t addr = HalAddr(pkt.addr);
     uint16_t tx_len = pkt.tx_data->length;
     if (tx_len <= 2) {
@@ -108,19 +110,19 @@ class Stm32I2cDevice : public I2c {
     }
   }
 
-  void WritePacket(I2cPacket &pkt) override {
+  void WritePacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Transmit(
         hi2c_, HalAddr(pkt.addr),
         pkt.tx_data->data, pkt.tx_data->length, timeout_);
   }
 
-  void ReadPacket(I2cPacket &pkt) override {
+  void ReadPacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Receive(
         hi2c_, HalAddr(pkt.addr),
         pkt.rx_data->data, pkt.rx_data->length, timeout_);
   }
 
-  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) override {
+  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
     // I2C does not use chip select — addressing is handled via the packet address
   }
 
@@ -131,7 +133,7 @@ class Stm32I2cDevice : public I2c {
    * @param timeout_ms Timeout in milliseconds for blocking transfers (default: 100)
    */
   explicit Stm32I2cDevice(I2C_HandleTypeDef *hi2c, uint32_t timeout_ms = 100)
-      : I2c{}, hi2c_(hi2c), timeout_(timeout_ms) {}
+      : hi2c_(hi2c), timeout_(timeout_ms) {}
 
   /// Get the HAL status from the last transfer
   HAL_StatusTypeDef last_status() const { return last_status_; }
@@ -148,8 +150,10 @@ class Stm32I2cDevice : public I2c {
  *
  * @tparam QueueSize Maximum number of packets that can be queued (default: 25)
  */
-template <uint8_t QueueSize = 25>
-class Stm32AsyncI2cDevice : public AsyncPacketSender<I2cPacket, QueueSize> {
+template <uint8_t QueueSize = 32>
+class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, QueueSize> {
+  friend class AsyncPacketSender<Stm32AsyncI2cDevice<QueueSize>, I2cPacket, QueueSize>;
+
  protected:
   I2C_HandleTypeDef *hi2c_;
   HAL_StatusTypeDef last_status_{HAL_OK};
@@ -164,7 +168,7 @@ class Stm32AsyncI2cDevice : public AsyncPacketSender<I2cPacket, QueueSize> {
    * When falling back, the read phase is handled by the AsyncPacketSender's
    * WriteThenRead sequencing via TxRxCmpltCb().
    */
-  void ReadWritePacket(I2cPacket &pkt) override {
+  void ReadWritePacket(I2cPacket &pkt) {
     uint16_t addr = HalAddr(pkt.addr);
     uint16_t tx_len = pkt.tx_data->length;
     if (tx_len <= 2) {
@@ -184,19 +188,19 @@ class Stm32AsyncI2cDevice : public AsyncPacketSender<I2cPacket, QueueSize> {
     }
   }
 
-  void WritePacket(I2cPacket &pkt) override {
+  void WritePacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Transmit_IT(
         hi2c_, HalAddr(pkt.addr),
         pkt.tx_data->data, pkt.tx_data->length);
   }
 
-  void ReadPacket(I2cPacket &pkt) override {
+  void ReadPacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Receive_IT(
         hi2c_, HalAddr(pkt.addr),
         pkt.rx_data->data, pkt.rx_data->length);
   }
 
-  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) override {
+  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
     // I2C does not use chip select
   }
 

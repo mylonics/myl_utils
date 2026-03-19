@@ -26,6 +26,8 @@ class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {
 
   bool Readable() { return wloc_ != rloc_; }
 
+  bool Writable() { return ((wloc_ + 1) % size) != rloc_; }
+
  private:
   T buf_[size];
   volatile size_t wloc_;

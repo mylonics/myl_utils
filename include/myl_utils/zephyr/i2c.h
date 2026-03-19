@@ -9,19 +9,21 @@
  *
  * Usage:
  * @code
- * // Create device instance
+ * // Create transport instance
  * const struct device *i2c_dev = DEVICE_DT_GET(DT_NODELABEL(i2c0));
  * ZephyrI2cDevice i2c(i2c_dev);
  *
- * // Create and configure a packet
- * I2C_PACKET_HELPER(0x50, eeprom_pkt, 16);
- * eeprom_pkt_tx_data_.data[0] = 0x00;  // Register address
- * eeprom_pkt_tx_data_.length = 1;
- * eeprom_pkt_rx_data_.length = 8;
- * eeprom_pkt.type = PacketType::WriteThenRead;
+ * // Wrap transport with per-device config (address, callback)
+ * I2cDevice<I2c> eeprom(i2c, 0x50);
  *
- * // Execute transfer
- * i2c.ProcessCommand(eeprom_pkt);
+ * // Create and configure buffers
+ * Buffer<16> tx;
+ * Buffer<16> rx;
+ * tx.Set(0x00);  // Register address, length = 1
+ * rx.length = 8;
+ *
+ * // Execute transfer — address is applied automatically
+ * eeprom.WriteThenRead(tx, rx);
  * @endcode
  */
 
@@ -42,41 +44,51 @@
 class ZephyrI2cDevice : public I2c {
  protected:
   const struct device *dev_;
-  struct i2c_msg msgs_[2];
-  uint8_t msg_count{};
+  int last_error_{};
 
   /**
    * @brief Execute the prepared I2C transfer
-   * @param pkt The packet containing transfer data and address
+   * @param msgs Pointer to I2C message array
+   * @param count Number of messages
+   * @param pkt The packet containing the device address
    */
-  virtual void StartTransfer(I2cPacket &pkt) { i2c_transfer(dev_, msgs_, msg_count, pkt.addr); }
+  virtual void StartTransfer(struct i2c_msg *msgs, uint8_t count, I2cPacket &pkt) {
+    last_error_ = i2c_transfer(dev_, msgs, count, pkt.addr);
+  }
 
+  /**
+   * @brief Write-then-read using I2C RESTART condition
+   *
+   * @note On I2C, ReadWritePacket and WriteThenRead are functionally identical
+   * (both use a RESTART between write and read phases). There is no true
+   * simultaneous full-duplex on I2C.
+   */
   void ReadWritePacket(I2cPacket &pkt) override {
-    msgs_[0].buf = pkt.tx_data.data;
-    msgs_[0].len = pkt.tx_data.length;
-    msgs_[0].flags = I2C_MSG_WRITE;
+    struct i2c_msg msgs[2];
+    msgs[0].buf = pkt.tx_data->data;
+    msgs[0].len = pkt.tx_data->length;
+    msgs[0].flags = I2C_MSG_WRITE;
 
-    msgs_[1].buf = pkt.rx_data.data;
-    msgs_[1].len = pkt.rx_data.length;
-    msgs_[1].flags = I2C_MSG_RESTART | I2C_MSG_READ | I2C_MSG_STOP;
-    msg_count = 2;
-    StartTransfer(pkt);
+    msgs[1].buf = pkt.rx_data->data;
+    msgs[1].len = pkt.rx_data->length;
+    msgs[1].flags = I2C_MSG_RESTART | I2C_MSG_READ | I2C_MSG_STOP;
+    StartTransfer(msgs, 2, pkt);
   }
 
   void WritePacket(I2cPacket &pkt) override {
-    msgs_[0].buf = pkt.tx_data.data;
-    msgs_[0].len = pkt.tx_data.length;
-    msgs_[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
-    msg_count = 1;
-    StartTransfer(pkt);
+    struct i2c_msg msg;
+    msg.buf = pkt.tx_data->data;
+    msg.len = pkt.tx_data->length;
+    msg.flags = I2C_MSG_WRITE | I2C_MSG_STOP;
+    StartTransfer(&msg, 1, pkt);
   }
 
   void ReadPacket(I2cPacket &pkt) override {
-    msgs_[0].buf = pkt.rx_data.data;
-    msgs_[0].len = pkt.rx_data.length;
-    msgs_[0].flags = I2C_MSG_READ | I2C_MSG_STOP;
-    msg_count = 1;
-    StartTransfer(pkt);
+    struct i2c_msg msg;
+    msg.buf = pkt.rx_data->data;
+    msg.len = pkt.rx_data->length;
+    msg.flags = I2C_MSG_READ | I2C_MSG_STOP;
+    StartTransfer(&msg, 1, pkt);
   }
 
   void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) override {
@@ -89,4 +101,7 @@ class ZephyrI2cDevice : public I2c {
    * @param i2c_dev Pointer to the Zephyr I2C device (from DEVICE_DT_GET)
    */
   explicit ZephyrI2cDevice(const struct device *i2c_dev) : I2c{}, dev_(i2c_dev) {}
+
+  /// Get the error code from the last transfer (0 = success)
+  int last_error() const { return last_error_; }
 };

@@ -9,24 +9,25 @@
  *
  * Usage:
  * @code
- * // Create device instance
+ * // Create transport instance
  * const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi0));
  * const struct spi_config spi_cfg = {
  *     .frequency = 1000000,
  *     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8),
- *     .cs = { .gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(my_device), cs_gpios, 0) }
  * };
  * ZephyrSpiDevice spi(spi_dev, &spi_cfg);
  *
- * // Create and configure a packet
- * SPI_PACKET_HELPER(sensor_pkt, 16);
- * sensor_pkt_tx_data_.data[0] = 0x80 | REG_ADDR;  // Read register
- * sensor_pkt_tx_data_.length = 1;
- * sensor_pkt_rx_data_.length = 4;
- * sensor_pkt.type = PacketType::WriteThenRead;
+ * // Wrap transport with per-device config (chip select, callback)
+ * SpiDevice<Spi> sensor(spi, my_cs_func);
  *
- * // Execute transfer
- * spi.ProcessCommand(sensor_pkt);
+ * // Create and configure buffers
+ * Buffer<16> tx;
+ * Buffer<16> rx;
+ * tx.Set(0x80 | REG_ADDR);  // Read register, length = 1
+ * rx.length = 4;
+ *
+ * // Execute transfer — chip select is applied automatically
+ * sensor.WriteThenRead(tx, rx);
  * @endcode
  */
 
@@ -48,50 +49,35 @@ class ZephyrSpiDevice : public Spi {
  protected:
   const struct device *dev_;
   const struct spi_config *config_;
-  spi_buf tx_buf_{};
-  spi_buf rx_buf_{};
-  spi_buf_set tx_buf_set_{};
-  spi_buf_set rx_buf_set_{};
+  int last_error_{};
 
   /**
-   * @brief Execute the prepared SPI transfer
+   * @brief Execute an SPI transfer
+   * @param tx Pointer to TX buffer set (nullptr for read-only)
+   * @param rx Pointer to RX buffer set (nullptr for write-only)
    */
-  void StartTransfer() {
-    if (tx_buf_set_.count == 0) {
-      spi_transceive(dev_, config_, NULL, &rx_buf_set_);
-    } else if (rx_buf_set_.count == 0) {
-      spi_transceive(dev_, config_, &tx_buf_set_, NULL);
-    } else {
-      spi_transceive(dev_, config_, &tx_buf_set_, &rx_buf_set_);
-    }
+  void StartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
+    last_error_ = spi_transceive(dev_, config_, tx, rx);
   }
 
   void ReadWritePacket(SpiPacket &pkt) override {
-    tx_buf_ = {pkt.tx_data.data, pkt.tx_data.length};
-    rx_buf_ = {pkt.rx_data.data, pkt.rx_data.length};
-
-    tx_buf_set_ = {&tx_buf_, 1};
-    rx_buf_set_ = {&rx_buf_, 1};
-
-    StartTransfer();
+    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
+    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
+    spi_buf_set tx_set = {&tx_buf, 1};
+    spi_buf_set rx_set = {&rx_buf, 1};
+    StartTransfer(&tx_set, &rx_set);
   }
 
   void WritePacket(SpiPacket &pkt) override {
-    tx_buf_ = {pkt.tx_data.data, pkt.tx_data.length};
-
-    tx_buf_set_ = {&tx_buf_, 1};
-    rx_buf_set_.count = 0;
-
-    StartTransfer();
+    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
+    spi_buf_set tx_set = {&tx_buf, 1};
+    StartTransfer(&tx_set, nullptr);
   }
 
   void ReadPacket(SpiPacket &pkt) override {
-    rx_buf_ = {pkt.rx_data.data, pkt.rx_data.length};
-
-    tx_buf_set_.count = 0;
-    rx_buf_set_ = {&rx_buf_, 1};
-
-    StartTransfer();
+    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
+    spi_buf_set rx_set = {&rx_buf, 1};
+    StartTransfer(nullptr, &rx_set);
   }
 
   void ChipSelect(SpiPacket &pkt, bool enable) override {
@@ -108,4 +94,7 @@ class ZephyrSpiDevice : public Spi {
    */
   ZephyrSpiDevice(const struct device *spi_dev, const struct spi_config *spi_config)
       : Spi{}, dev_(spi_dev), config_(spi_config) {}
+
+  /// Get the error code from the last transfer (0 = success)
+  int last_error() const { return last_error_; }
 };

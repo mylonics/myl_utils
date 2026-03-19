@@ -5,10 +5,10 @@
 #include <functional>
 
 #include "buffer.h"
-#include "utils/noncopyable.h"
+#include "myl_utils/noncopyable.h"
 
 template <class T, size_t size>
-    class InterruptTxBuffer : NonCopyable < InterruptTxBuffer<T, size> {
+class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
  public:
   InterruptTxBuffer(std::function<void(T *, size_t)> transmit_function) : transmit_function_(transmit_function) {}
 

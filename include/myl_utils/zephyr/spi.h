@@ -39,6 +39,8 @@
 #error Enable CONFIG_MYL_UTILS_SPI in kconfig (prj.conf)
 #endif
 
+namespace myl_utils {
+
 /**
  * @brief Synchronous Zephyr SPI device implementation
  *

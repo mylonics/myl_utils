@@ -34,6 +34,8 @@
 #error Enable CONFIG_MYL_UTILS_I2C in kconfig (prj.conf)
 #endif
 
+namespace myl_utils {
+
 /**
  * @brief Synchronous Zephyr I2C device implementation
  *

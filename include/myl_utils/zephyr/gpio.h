@@ -27,6 +27,8 @@
 #include <myl_utils/gpio.h>
 #include <zephyr/drivers/gpio.h>
 
+namespace myl_utils {
+
 /**
  * @brief Zephyr GPIO output pin
  *

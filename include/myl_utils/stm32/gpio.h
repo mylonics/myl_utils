@@ -36,6 +36,8 @@
 #error "Include your STM32 HAL header (e.g. stm32f4xx_hal.h) before myl_utils/stm32/gpio.h"
 #endif
 
+namespace myl_utils {
+
 /**
  * @brief STM32 HAL GPIO output pin
  */

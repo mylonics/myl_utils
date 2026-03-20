@@ -56,8 +56,9 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
    * @param count Number of messages
    * @param pkt The packet containing the device address
    */
-  void StartTransfer(struct i2c_msg *msgs, uint8_t count, I2cPacket &pkt) {
+  bool StartTransfer(struct i2c_msg *msgs, uint8_t count, I2cPacket &pkt) {
     last_error_ = i2c_transfer(dev_, msgs, count, pkt.addr);
+    return last_error_ == 0;
   }
 
   /**
@@ -67,7 +68,7 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
    * (both use a RESTART between write and read phases). There is no true
    * simultaneous full-duplex on I2C.
    */
-  void ReadWritePacket(I2cPacket &pkt) {
+  bool ReadWritePacket(I2cPacket &pkt) {
     struct i2c_msg msgs[2];
     msgs[0].buf = pkt.tx_data->data;
     msgs[0].len = pkt.tx_data->length;
@@ -76,23 +77,23 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
     msgs[1].buf = pkt.rx_data->data;
     msgs[1].len = pkt.rx_data->length;
     msgs[1].flags = I2C_MSG_RESTART | I2C_MSG_READ | I2C_MSG_STOP;
-    StartTransfer(msgs, 2, pkt);
+    return StartTransfer(msgs, 2, pkt);
   }
 
-  void WritePacket(I2cPacket &pkt) {
+  bool WritePacket(I2cPacket &pkt) {
     struct i2c_msg msg;
     msg.buf = pkt.tx_data->data;
     msg.len = pkt.tx_data->length;
     msg.flags = I2C_MSG_WRITE | I2C_MSG_STOP;
-    StartTransfer(&msg, 1, pkt);
+    return StartTransfer(&msg, 1, pkt);
   }
 
-  void ReadPacket(I2cPacket &pkt) {
+  bool ReadPacket(I2cPacket &pkt) {
     struct i2c_msg msg;
     msg.buf = pkt.rx_data->data;
     msg.len = pkt.rx_data->length;
     msg.flags = I2C_MSG_READ | I2C_MSG_STOP;
-    StartTransfer(&msg, 1, pkt);
+    return StartTransfer(&msg, 1, pkt);
   }
 
   void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {

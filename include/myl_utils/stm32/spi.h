@@ -73,20 +73,23 @@ class Stm32SpiDevice : public Spi<Stm32SpiDevice> {
   uint32_t timeout_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
-  void ReadWritePacket(SpiPacket &pkt) {
+  bool ReadWritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_TransmitReceive(
         hspi_, pkt.tx_data->data, pkt.rx_data->data,
         pkt.tx_data->length, timeout_);
+    return last_status_ == HAL_OK;
   }
 
-  void WritePacket(SpiPacket &pkt) {
+  bool WritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Transmit(
         hspi_, pkt.tx_data->data, pkt.tx_data->length, timeout_);
+    return last_status_ == HAL_OK;
   }
 
-  void ReadPacket(SpiPacket &pkt) {
+  bool ReadPacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Receive(
         hspi_, pkt.rx_data->data, pkt.rx_data->length, timeout_);
+    return last_status_ == HAL_OK;
   }
 
   void ChipSelect(SpiPacket &pkt, bool enable) {
@@ -133,20 +136,23 @@ class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<QueueSize>, Queu
   SPI_HandleTypeDef *hspi_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
-  void ReadWritePacket(SpiPacket &pkt) {
+  bool ReadWritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_TransmitReceive_IT(
         hspi_, pkt.tx_data->data, pkt.rx_data->data,
         pkt.tx_data->length);
+    return last_status_ == HAL_OK;
   }
 
-  void WritePacket(SpiPacket &pkt) {
+  bool WritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Transmit_IT(
         hspi_, pkt.tx_data->data, pkt.tx_data->length);
+    return last_status_ == HAL_OK;
   }
 
-  void ReadPacket(SpiPacket &pkt) {
+  bool ReadPacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Receive_IT(
         hspi_, pkt.rx_data->data, pkt.rx_data->length);
+    return last_status_ == HAL_OK;
   }
 
   void ChipSelect(SpiPacket &pkt, bool enable) {

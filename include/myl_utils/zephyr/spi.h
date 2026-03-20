@@ -61,28 +61,29 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
    * @param tx Pointer to TX buffer set (nullptr for read-only)
    * @param rx Pointer to RX buffer set (nullptr for write-only)
    */
-  void StartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
+  bool StartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
     last_error_ = spi_transceive(dev_, &config_, tx, rx);
+    return last_error_ == 0;
   }
 
-  void ReadWritePacket(SpiPacket &pkt) {
+  bool ReadWritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
     spi_buf_set rx_set = {&rx_buf, 1};
-    StartTransfer(&tx_set, &rx_set);
+    return StartTransfer(&tx_set, &rx_set);
   }
 
-  void WritePacket(SpiPacket &pkt) {
+  bool WritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
-    StartTransfer(&tx_set, nullptr);
+    return StartTransfer(&tx_set, nullptr);
   }
 
-  void ReadPacket(SpiPacket &pkt) {
+  bool ReadPacket(SpiPacket &pkt) {
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set rx_set = {&rx_buf, 1};
-    StartTransfer(nullptr, &rx_set);
+    return StartTransfer(nullptr, &rx_set);
   }
 
   void ChipSelect(SpiPacket &pkt, bool enable) {

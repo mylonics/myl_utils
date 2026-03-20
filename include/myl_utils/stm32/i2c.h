@@ -87,7 +87,7 @@ class Stm32I2cDevice : public I2c<Stm32I2cDevice> {
    * Falls back to separate Transmit + Receive when TX length > 2 bytes
    * (exceeds HAL_I2C_Mem_Read's MemAddSize).
    */
-  void ReadWritePacket(I2cPacket &pkt) {
+  bool ReadWritePacket(I2cPacket &pkt) {
     uint16_t addr = HalAddr(pkt.addr);
     uint16_t tx_len = pkt.tx_data->length;
     if (tx_len <= 2) {
@@ -110,18 +110,21 @@ class Stm32I2cDevice : public I2c<Stm32I2cDevice> {
             hi2c_, addr, pkt.rx_data->data, pkt.rx_data->length, timeout_);
       }
     }
+    return last_status_ == HAL_OK;
   }
 
-  void WritePacket(I2cPacket &pkt) {
+  bool WritePacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Transmit(
         hi2c_, HalAddr(pkt.addr),
         pkt.tx_data->data, pkt.tx_data->length, timeout_);
+    return last_status_ == HAL_OK;
   }
 
-  void ReadPacket(I2cPacket &pkt) {
+  bool ReadPacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Receive(
         hi2c_, HalAddr(pkt.addr),
         pkt.rx_data->data, pkt.rx_data->length, timeout_);
+    return last_status_ == HAL_OK;
   }
 
   void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
@@ -170,7 +173,7 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, Queu
    * When falling back, the read phase is handled by the AsyncPacketSender's
    * WriteThenRead sequencing via TxRxCmpltCb().
    */
-  void ReadWritePacket(I2cPacket &pkt) {
+  bool ReadWritePacket(I2cPacket &pkt) {
     uint16_t addr = HalAddr(pkt.addr);
     uint16_t tx_len = pkt.tx_data->length;
     if (tx_len <= 2) {
@@ -188,18 +191,21 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, Queu
       last_status_ = HAL_I2C_Master_Transmit_IT(
           hi2c_, addr, pkt.tx_data->data, tx_len);
     }
+    return last_status_ == HAL_OK;
   }
 
-  void WritePacket(I2cPacket &pkt) {
+  bool WritePacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Transmit_IT(
         hi2c_, HalAddr(pkt.addr),
         pkt.tx_data->data, pkt.tx_data->length);
+    return last_status_ == HAL_OK;
   }
 
-  void ReadPacket(I2cPacket &pkt) {
+  bool ReadPacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Receive_IT(
         hi2c_, HalAddr(pkt.addr),
         pkt.rx_data->data, pkt.rx_data->length);
+    return last_status_ == HAL_OK;
   }
 
   void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {

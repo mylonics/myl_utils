@@ -194,9 +194,9 @@ struct I2cPacketBundle {
  * next queued packet.
  *
  * Derived classes must implement (as non-virtual methods):
- *   void ReadWritePacket(DataPacket &pkt)
- *   void WritePacket(DataPacket &pkt)
- *   void ReadPacket(DataPacket &pkt)
+ *   bool ReadWritePacket(DataPacket &pkt)
+ *   bool WritePacket(DataPacket &pkt)
+ *   bool ReadPacket(DataPacket &pkt)
  *   void ChipSelect(DataPacket &pkt, bool enable)
  *
  * @note ISR safety assumes ARM Cortex-M memory model (single-core, strongly-ordered
@@ -227,12 +227,15 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
    *
    * Handles WriteThenRead sequencing and invokes completion callbacks.
    * Automatically processes next queued packet if available.
+   *
+   * If the read phase of a WriteThenRead fails to start, falls through
+   * to cleanup (ChipSelect deassert, callback, next packet).
    */
   void TxRxCmpltCb() {
     if (current_command_->type == PacketType::WriteThenRead && write_and_read_pkt_) {
       write_and_read_pkt_ = false;
-      derived().ReadPacket(*current_command_);
-      return;
+      if (derived().ReadPacket(*current_command_)) return;
+      // Read failed to start — fall through to cleanup
     }
 
     derived().ChipSelect(*current_command_, false);
@@ -261,32 +264,37 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
       pkt_queue_.Put(&pkt);
       return true;
     } else {
-      SendPacket(pkt);
-      return true;
+      return SendPacket(pkt);
     }
   }
 
-  void SendPacket(DataPacket &pkt) {
+  bool SendPacket(DataPacket &pkt) {
     busy_ = true;
     write_and_read_pkt_ = false;
     current_command_ = &pkt;
     derived().ChipSelect(pkt, true);
+    bool ok = false;
     switch (pkt.type) {
       case PacketType::Read:
-        derived().ReadPacket(pkt);
+        ok = derived().ReadPacket(pkt);
         break;
       case PacketType::WriteAndRead:
-        derived().ReadWritePacket(pkt);
+        ok = derived().ReadWritePacket(pkt);
         break;
       case PacketType::WriteThenRead:
         write_and_read_pkt_ = true;
-        derived().WritePacket(pkt);
+        ok = derived().WritePacket(pkt);
         break;
       case PacketType::Write:
       default:
-        derived().WritePacket(pkt);
+        ok = derived().WritePacket(pkt);
         break;
     }
+    if (!ok) {
+      derived().ChipSelect(pkt, false);
+      busy_ = false;
+    }
+    return ok;
   }
 };
 
@@ -297,9 +305,9 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
  * completes the entire transfer before returning.
  *
  * Derived classes must implement (as non-virtual methods):
- *   void ReadWritePacket(DataPacket &pkt)
- *   void WritePacket(DataPacket &pkt)
- *   void ReadPacket(DataPacket &pkt)
+ *   bool ReadWritePacket(DataPacket &pkt)
+ *   bool WritePacket(DataPacket &pkt)
+ *   bool ReadPacket(DataPacket &pkt)
  *   void ChipSelect(DataPacket &pkt, bool enable)
  *
  * @tparam Derived The concrete implementation class (CRTP parameter)
@@ -312,35 +320,36 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
   /**
    * @brief Execute a packet transfer (blocking)
    * @param pkt Packet to transfer
-   * @return Always true (sync transfers cannot fail to queue)
+   * @return true if the transfer succeeded, false on hardware error
    */
-  bool ProcessCommand(DataPacket &pkt) {
-    SendPacket(pkt);
-    return true;
+  [[nodiscard]] bool ProcessCommand(DataPacket &pkt) {
+    return SendPacket(pkt);
   }
 
  private:
   Derived &derived() { return static_cast<Derived &>(*this); }
 
-  void SendPacket(DataPacket &pkt) {
+  bool SendPacket(DataPacket &pkt) {
+    bool ok = true;
     derived().ChipSelect(pkt, true);
     switch (pkt.type) {
       case PacketType::Read:
-        derived().ReadPacket(pkt);
+        ok = derived().ReadPacket(pkt);
         break;
       case PacketType::WriteAndRead:
-        derived().ReadWritePacket(pkt);
+        ok = derived().ReadWritePacket(pkt);
         break;
       case PacketType::WriteThenRead:
-        derived().WritePacket(pkt);
-        derived().ReadPacket(pkt);
+        ok = derived().WritePacket(pkt);
+        if (ok) ok = derived().ReadPacket(pkt);
         break;
       case PacketType::Write:
       default:
-        derived().WritePacket(pkt);
+        ok = derived().WritePacket(pkt);
         break;
     }
     derived().ChipSelect(pkt, false);
+    return ok;
   }
 };
 
@@ -405,35 +414,35 @@ class SpiDevice {
   }
 
   /// Write-only transfer (sync transports only)
-  void Write(Data &tx) {
+  [[nodiscard]] bool Write(Data &tx) {
     static_assert(Transport::is_sync, "Write() uses a stack-local packet; use ProcessCommand() with async transports");
     SpiPacket pkt{&tx};
     pkt.type = PacketType::Write;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Read-only transfer (sync transports only)
-  void Read(Data &rx) {
+  [[nodiscard]] bool Read(Data &rx) {
     static_assert(Transport::is_sync, "Read() uses a stack-local packet; use ProcessCommand() with async transports");
     SpiPacket pkt{nullptr, &rx};
     pkt.type = PacketType::Read;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Full-duplex simultaneous write and read (sync transports only)
-  void WriteAndRead(Data &tx, Data &rx) {
+  [[nodiscard]] bool WriteAndRead(Data &tx, Data &rx) {
     static_assert(Transport::is_sync, "WriteAndRead() uses a stack-local packet; use ProcessCommand() with async transports");
     SpiPacket pkt{&tx, &rx};
     pkt.type = PacketType::WriteAndRead;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Write first, then read (sync transports only)
-  void WriteThenRead(Data &tx, Data &rx) {
+  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
     static_assert(Transport::is_sync, "WriteThenRead() uses a stack-local packet; use ProcessCommand() with async transports");
     SpiPacket pkt{&tx, &rx};
     pkt.type = PacketType::WriteThenRead;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Access the underlying transport (e.g., to check last_status() / last_error())
@@ -471,27 +480,27 @@ class I2cDevice {
   }
 
   /// Write-only transfer (sync transports only)
-  void Write(Data &tx) {
+  [[nodiscard]] bool Write(Data &tx) {
     static_assert(Transport::is_sync, "Write() uses a stack-local packet; use ProcessCommand() with async transports");
     I2cPacket pkt{&tx};
     pkt.type = PacketType::Write;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Read-only transfer (sync transports only)
-  void Read(Data &rx) {
+  [[nodiscard]] bool Read(Data &rx) {
     static_assert(Transport::is_sync, "Read() uses a stack-local packet; use ProcessCommand() with async transports");
     I2cPacket pkt{nullptr, &rx};
     pkt.type = PacketType::Read;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Write first, then read (sync transports only)
-  void WriteThenRead(Data &tx, Data &rx) {
+  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
     static_assert(Transport::is_sync, "WriteThenRead() uses a stack-local packet; use ProcessCommand() with async transports");
     I2cPacket pkt{&tx, &rx};
     pkt.type = PacketType::WriteThenRead;
-    ProcessCommand(pkt);
+    return ProcessCommand(pkt);
   }
 
   /// Access the underlying transport (e.g., to check last_status() / last_error())

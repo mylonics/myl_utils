@@ -30,10 +30,10 @@
  * eeprom.WriteThenRead(tx, rx);
  * @endcode
  *
- * Usage (asynchronous):
+ * Usage (asynchronous, interrupt):
  * @code
  * extern I2C_HandleTypeDef hi2c1;
- * Stm32AsyncI2cDevice i2c(&hi2c1);
+ * Stm32AsyncI2cDevice<> i2c(&hi2c1);  // defaults to TransferMode::Interrupt
  *
  * I2cDevice<Stm32AsyncI2cDevice<>> eeprom(i2c, 0x50, my_callback);
  *
@@ -44,6 +44,24 @@
  * eeprom.ProcessCommand(cmd.pkt);
  *
  * // In your HAL callbacks (HAL_I2C_MasterTxCpltCallback, etc.):
+ * i2c.TxRxCmpltCb();
+ * @endcode
+ *
+ * Usage (asynchronous, DMA):
+ * @code
+ * extern I2C_HandleTypeDef hi2c1;
+ * Stm32DmaI2cDevice<> i2c(&hi2c1);   // alias for Stm32AsyncI2cDevice<TransferMode::Dma>
+ *
+ * I2cDevice<Stm32DmaI2cDevice<>> eeprom(i2c, 0x50, my_callback);
+ *
+ * // Buffers must be in DMA-accessible RAM (not DTCM on F7/H7)
+ * I2cPacketBundle<16> cmd;
+ * cmd.tx.Set(0x00);
+ * cmd.rx.length = 8;
+ * cmd.pkt.type = PacketType::WriteThenRead;
+ * eeprom.ProcessCommand(cmd.pkt);
+ *
+ * // In your HAL DMA callbacks:
  * i2c.TxRxCmpltCb();
  * @endcode
  */
@@ -145,19 +163,22 @@ class Stm32I2cDevice : public I2c<Stm32I2cDevice> {
 };
 
 /**
- * @brief Asynchronous (interrupt) STM32 HAL I2C device implementation
+ * @brief Asynchronous (interrupt/DMA) STM32 HAL I2C device implementation
  *
- * Uses HAL_I2C_Master_Transmit_IT / HAL_I2C_Master_Receive_IT /
- * HAL_I2C_Mem_Read_IT for non-blocking transfers. Call TxRxCmpltCb() from the
- * appropriate HAL callbacks (HAL_I2C_MasterTxCpltCallback,
- * HAL_I2C_MasterRxCpltCallback, HAL_I2C_MemRxCpltCallback) to advance the
- * transfer queue.
+ * Uses interrupt (_IT) or DMA (_DMA) HAL functions depending on the Mode
+ * template parameter. Call TxRxCmpltCb() from the appropriate HAL callbacks
+ * (HAL_I2C_MasterTxCpltCallback, HAL_I2C_MasterRxCpltCallback,
+ * HAL_I2C_MemRxCpltCallback) to advance the transfer queue.
  *
- * @tparam QueueSize Maximum number of packets that can be queued (default: 25)
+ * @note When using DMA mode, all TX/RX buffers must reside in DMA-accessible
+ * memory. On STM32 F7/H7, this excludes DTCM/ITCM.
+ *
+ * @tparam Mode Transfer mode: TransferMode::Interrupt (default) or TransferMode::Dma
+ * @tparam QueueSize Maximum number of packets that can be queued (default: 32)
  */
-template <uint8_t QueueSize = 32>
-class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, QueueSize> {
-  friend class AsyncPacketSender<Stm32AsyncI2cDevice<QueueSize>, I2cPacket, QueueSize>;
+template <TransferMode Mode = TransferMode::Interrupt, uint8_t QueueSize = 32>
+class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<Mode, QueueSize>, QueueSize> {
+  friend class AsyncPacketSender<Stm32AsyncI2cDevice<Mode, QueueSize>, I2cPacket, QueueSize>;
 
  protected:
   I2C_HandleTypeDef *hi2c_;
@@ -183,28 +204,51 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, Queu
         mem_addr = (static_cast<uint16_t>(pkt.tx_data->data[0]) << 8) | pkt.tx_data->data[1];
         mem_size = I2C_MEMADD_SIZE_16BIT;
       }
-      last_status_ = HAL_I2C_Mem_Read_IT(
-          hi2c_, addr, mem_addr, mem_size,
-          pkt.rx_data->data, pkt.rx_data->length);
+      if constexpr (Mode == TransferMode::Dma) {
+        last_status_ = HAL_I2C_Mem_Read_DMA(
+            hi2c_, addr, mem_addr, mem_size,
+            pkt.rx_data->data, pkt.rx_data->length);
+      } else {
+        last_status_ = HAL_I2C_Mem_Read_IT(
+            hi2c_, addr, mem_addr, mem_size,
+            pkt.rx_data->data, pkt.rx_data->length);
+      }
     } else {
       // The base class WriteThenRead sequencing handles the read phase
-      last_status_ = HAL_I2C_Master_Transmit_IT(
-          hi2c_, addr, pkt.tx_data->data, tx_len);
+      if constexpr (Mode == TransferMode::Dma) {
+        last_status_ = HAL_I2C_Master_Transmit_DMA(
+            hi2c_, addr, pkt.tx_data->data, tx_len);
+      } else {
+        last_status_ = HAL_I2C_Master_Transmit_IT(
+            hi2c_, addr, pkt.tx_data->data, tx_len);
+      }
     }
     return last_status_ == HAL_OK;
   }
 
   bool WritePacket(I2cPacket &pkt) {
-    last_status_ = HAL_I2C_Master_Transmit_IT(
-        hi2c_, HalAddr(pkt.addr),
-        pkt.tx_data->data, pkt.tx_data->length);
+    if constexpr (Mode == TransferMode::Dma) {
+      last_status_ = HAL_I2C_Master_Transmit_DMA(
+          hi2c_, HalAddr(pkt.addr),
+          pkt.tx_data->data, pkt.tx_data->length);
+    } else {
+      last_status_ = HAL_I2C_Master_Transmit_IT(
+          hi2c_, HalAddr(pkt.addr),
+          pkt.tx_data->data, pkt.tx_data->length);
+    }
     return last_status_ == HAL_OK;
   }
 
   bool ReadPacket(I2cPacket &pkt) {
-    last_status_ = HAL_I2C_Master_Receive_IT(
-        hi2c_, HalAddr(pkt.addr),
-        pkt.rx_data->data, pkt.rx_data->length);
+    if constexpr (Mode == TransferMode::Dma) {
+      last_status_ = HAL_I2C_Master_Receive_DMA(
+          hi2c_, HalAddr(pkt.addr),
+          pkt.rx_data->data, pkt.rx_data->length);
+    } else {
+      last_status_ = HAL_I2C_Master_Receive_IT(
+          hi2c_, HalAddr(pkt.addr),
+          pkt.rx_data->data, pkt.rx_data->length);
+    }
     return last_status_ == HAL_OK;
   }
 
@@ -222,5 +266,10 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, Queu
   /// Get the HAL status from the last transfer
   HAL_StatusTypeDef last_status() const { return last_status_; }
 };
+
+/// @brief Convenience alias for DMA-based async I2C
+/// @tparam QueueSize Maximum number of packets that can be queued (default: 32)
+template <uint8_t QueueSize = 32>
+using Stm32DmaI2cDevice = Stm32AsyncI2cDevice<TransferMode::Dma, QueueSize>;
 
 }  // namespace myl_utils

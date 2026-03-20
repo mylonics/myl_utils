@@ -38,6 +38,16 @@ config MYL_UTILS_SPI
 	help
 	  This option enables the use of the mylonics spi libraries.
 
+config MYL_UTILS_SPI_ASYNC
+	bool "Enable Mylonics Async SPI Utilities"
+	default n
+	depends on MYL_UTILS_SPI
+	select SPI_ASYNC
+	help
+	  This option enables the use of the mylonics async spi libraries
+	  using Zephyr's spi_transceive_async() with k_poll_signal for
+	  non-blocking DMA/interrupt-driven SPI transfers.
+
 config MYL_UTILS_I2C
 	bool "Enable Mylonics I2C Utilities"
 	default n

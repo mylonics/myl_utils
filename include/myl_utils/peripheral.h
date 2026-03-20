@@ -102,6 +102,22 @@ enum class SpiPhase : uint8_t {
 };
 
 /**
+ * @brief Transfer mode for asynchronous peripheral operations
+ *
+ * Controls whether async transfers use interrupt-driven (IT) or DMA-based
+ * hardware. Both modes use the same AsyncPacketSender queue/callback
+ * infrastructure — only the underlying HAL/driver call differs.
+ *
+ * @note DMA mode requires that TX/RX buffers reside in DMA-accessible memory.
+ * On STM32 F7/H7, this excludes DTCM/ITCM; ensure your SpiPacketBundle or
+ * Buffer objects are allocated in a suitable RAM section.
+ */
+enum class TransferMode : uint8_t {
+  Interrupt,  ///< Use interrupt-based HAL functions (_IT)
+  Dma         ///< Use DMA-based HAL functions (_DMA)
+};
+
+/**
  * @brief SPI transfer packet containing buffer pointers and transfer configuration
  *
  * Buffers are optional — set only tx_data for write-only, only rx_data for read-only,
@@ -451,6 +467,132 @@ class SpiDevice {
 };
 
 /**
+ * @brief Dual-mode SPI device wrapper (sync + async from one object)
+ *
+ * Combines a synchronous transport and an asynchronous transport behind a single
+ * device interface. Both transports must share the same underlying SPI bus — it
+ * is the caller's responsibility to ensure no overlapping transfers.
+ *
+ * Blocking convenience methods (Write, Read, WriteThenRead, WriteAndRead) use
+ * the sync transport with stack-local packets. The async path
+ * (ProcessCommand) uses the async transport with long-lived packets.
+ *
+ * Usage:
+ * @code
+ * Stm32SpiDevice        sync_spi(&hspi1);
+ * Stm32DmaSpiDevice<>   dma_spi(&hspi1);
+ *
+ * DualSpiDevice sensor(sync_spi, dma_spi, cs_pin, my_async_callback);
+ *
+ * // Blocking single-register read during init
+ * Buffer<1> tx, rx;
+ * tx.Set(0x80 | WHO_AM_I);
+ * rx.length = 1;
+ * sensor.WriteThenRead(tx, rx);
+ *
+ * // Non-blocking bulk DMA read during runtime
+ * static SpiPacketBundle<256> bulk;
+ * bulk.pkt.type = PacketType::Read;
+ * bulk.rx.length = 256;
+ * sensor.ProcessCommand(bulk.pkt);
+ * @endcode
+ *
+ * @tparam SyncTransport  Synchronous SPI transport (must satisfy is_sync == true)
+ * @tparam AsyncTransport Asynchronous SPI transport (must satisfy is_sync == false)
+ */
+template <class SyncTransport, class AsyncTransport>
+class DualSpiDevice {
+  static_assert(SyncTransport::is_sync,   "SyncTransport must be a synchronous transport (is_sync == true)");
+  static_assert(!AsyncTransport::is_sync,  "AsyncTransport must be an asynchronous transport (is_sync == false)");
+
+  SyncTransport &sync_transport_;
+  AsyncTransport &async_transport_;
+  ChipSelectPin chip_select_{};
+  void (*callback_)(Data &){};
+  SpiPolarity polarity_{SpiPolarity::Low};
+  SpiPhase phase_{SpiPhase::Leading};
+
+  void StampPacket(SpiPacket &pkt) {
+    pkt.chip_select = chip_select_;
+    pkt.polarity = polarity_;
+    pkt.phase = phase_;
+    if (!pkt.callback) pkt.callback = callback_;
+  }
+
+ public:
+  /// Construct without chip select
+  DualSpiDevice(SyncTransport &sync, AsyncTransport &async,
+                void (*cb)(Data &) = nullptr,
+                SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
+      : sync_transport_(sync), async_transport_(async),
+        callback_(cb), polarity_(pol), phase_(pha) {}
+
+  /// Construct with chip select (any GPIO type that has Set(bool))
+  template <typename Gpio>
+  DualSpiDevice(SyncTransport &sync, AsyncTransport &async, Gpio &cs,
+                void (*cb)(Data &) = nullptr,
+                SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
+      : sync_transport_(sync), async_transport_(async),
+        chip_select_(cs), callback_(cb), polarity_(pol), phase_(pha) {}
+
+  /// Set SPI clock polarity and phase
+  void SetSpiMode(SpiPolarity pol, SpiPhase pha) {
+    polarity_ = pol;
+    phase_ = pha;
+  }
+
+  // --- Async path (uses the async transport with long-lived packets) ---
+
+  /// Queue an async transfer via the async transport (DMA/IT). Packet must outlive the transfer.
+  [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {
+    StampPacket(pkt);
+    return async_transport_.ProcessCommand(pkt);
+  }
+
+  // --- Sync path (uses the sync transport with stack-local packets) ---
+
+  /// Blocking write-only transfer
+  [[nodiscard]] bool Write(Data &tx) {
+    SpiPacket pkt{&tx};
+    pkt.type = PacketType::Write;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Blocking read-only transfer
+  [[nodiscard]] bool Read(Data &rx) {
+    SpiPacket pkt{nullptr, &rx};
+    pkt.type = PacketType::Read;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Blocking full-duplex simultaneous write and read
+  [[nodiscard]] bool WriteAndRead(Data &tx, Data &rx) {
+    SpiPacket pkt{&tx, &rx};
+    pkt.type = PacketType::WriteAndRead;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Blocking write first, then read
+  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
+    SpiPacket pkt{&tx, &rx};
+    pkt.type = PacketType::WriteThenRead;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Access the sync transport (e.g., to check last_status())
+  SyncTransport &sync_transport() { return sync_transport_; }
+  const SyncTransport &sync_transport() const { return sync_transport_; }
+
+  /// Access the async transport (e.g., to call TxRxCmpltCb(), check last_status())
+  AsyncTransport &async_transport() { return async_transport_; }
+  const AsyncTransport &async_transport() const { return async_transport_; }
+};
+
+/**
  * @brief I2C peripheral device wrapper
  *
  * Stores a reference to the I2C transport and per-device configuration
@@ -506,6 +648,79 @@ class I2cDevice {
   /// Access the underlying transport (e.g., to check last_status() / last_error())
   Transport &transport() { return transport_; }
   const Transport &transport() const { return transport_; }
+};
+
+/**
+ * @brief Dual-mode I2C device wrapper (sync + async from one object)
+ *
+ * Same concept as DualSpiDevice but for I2C. Combines a blocking transport
+ * for simple register reads and an async transport for DMA/interrupt bulk transfers.
+ *
+ * @tparam SyncTransport  Synchronous I2C transport (must satisfy is_sync == true)
+ * @tparam AsyncTransport Asynchronous I2C transport (must satisfy is_sync == false)
+ */
+template <class SyncTransport, class AsyncTransport>
+class DualI2cDevice {
+  static_assert(SyncTransport::is_sync,   "SyncTransport must be a synchronous transport (is_sync == true)");
+  static_assert(!AsyncTransport::is_sync,  "AsyncTransport must be an asynchronous transport (is_sync == false)");
+
+  SyncTransport &sync_transport_;
+  AsyncTransport &async_transport_;
+  uint8_t addr_{};
+  void (*callback_)(Data &){};
+
+  void StampPacket(I2cPacket &pkt) {
+    pkt.addr = addr_;
+    if (!pkt.callback) pkt.callback = callback_;
+  }
+
+ public:
+  DualI2cDevice(SyncTransport &sync, AsyncTransport &async,
+                uint8_t addr, void (*cb)(Data &) = nullptr)
+      : sync_transport_(sync), async_transport_(async),
+        addr_(addr), callback_(cb) {}
+
+  // --- Async path ---
+
+  /// Queue an async transfer via the async transport. Packet must outlive the transfer.
+  [[nodiscard]] bool ProcessCommand(I2cPacket &pkt) {
+    StampPacket(pkt);
+    return async_transport_.ProcessCommand(pkt);
+  }
+
+  // --- Sync path ---
+
+  /// Blocking write-only transfer
+  [[nodiscard]] bool Write(Data &tx) {
+    I2cPacket pkt{&tx};
+    pkt.type = PacketType::Write;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Blocking read-only transfer
+  [[nodiscard]] bool Read(Data &rx) {
+    I2cPacket pkt{nullptr, &rx};
+    pkt.type = PacketType::Read;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Blocking write first, then read
+  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
+    I2cPacket pkt{&tx, &rx};
+    pkt.type = PacketType::WriteThenRead;
+    StampPacket(pkt);
+    return sync_transport_.ProcessCommand(pkt);
+  }
+
+  /// Access the sync transport (e.g., to check last_status())
+  SyncTransport &sync_transport() { return sync_transport_; }
+  const SyncTransport &sync_transport() const { return sync_transport_; }
+
+  /// Access the async transport (e.g., to call TxRxCmpltCb(), check last_status())
+  AsyncTransport &async_transport() { return async_transport_; }
+  const AsyncTransport &async_transport() const { return async_transport_; }
 };
 
 }  // namespace myl_utils

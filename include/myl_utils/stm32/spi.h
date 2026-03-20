@@ -29,10 +29,10 @@
  * sensor.WriteThenRead(tx, rx);
  * @endcode
  *
- * Usage (asynchronous):
+ * Usage (asynchronous, interrupt):
  * @code
  * extern SPI_HandleTypeDef hspi1;
- * Stm32AsyncSpiDevice spi(&hspi1);
+ * Stm32AsyncSpiDevice<> spi(&hspi1);  // defaults to TransferMode::Interrupt
  *
  * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
  * SpiDevice<Stm32AsyncSpiDevice<>> sensor(spi, cs_pin, my_callback);
@@ -44,6 +44,27 @@
  * sensor.ProcessCommand(cmd.pkt);
  *
  * // In your HAL callback (e.g. HAL_SPI_TxCpltCallback):
+ * spi.TxRxCmpltCb();
+ * @endcode
+ *
+ * Usage (asynchronous, DMA):
+ * @code
+ * extern SPI_HandleTypeDef hspi1;
+ * Stm32DmaSpiDevice<> spi(&hspi1);   // alias for Stm32AsyncSpiDevice<TransferMode::Dma>
+ * // — or —
+ * Stm32AsyncSpiDevice<TransferMode::Dma> spi(&hspi1);
+ *
+ * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
+ * SpiDevice<Stm32DmaSpiDevice<>> sensor(spi, cs_pin, my_callback);
+ *
+ * // Buffers must be in DMA-accessible RAM (not DTCM on F7/H7)
+ * SpiPacketBundle<16> cmd;
+ * cmd.tx.Set(0x80 | REG_ADDR);
+ * cmd.rx.length = 4;
+ * cmd.pkt.type = PacketType::WriteThenRead;
+ * sensor.ProcessCommand(cmd.pkt);
+ *
+ * // In your HAL DMA callback (HAL_SPI_TxCpltCallback, etc.):
  * spi.TxRxCmpltCb();
  * @endcode
  */
@@ -121,37 +142,59 @@ class Stm32SpiDevice : public Spi<Stm32SpiDevice> {
 /**
  * @brief Asynchronous (interrupt/DMA) STM32 HAL SPI device implementation
  *
- * Uses HAL_SPI_Transmit_IT / HAL_SPI_Receive_IT / HAL_SPI_TransmitReceive_IT
- * for non-blocking transfers. Call TxRxCmpltCb() from the appropriate HAL
- * callbacks (HAL_SPI_TxCpltCallback, HAL_SPI_RxCpltCallback,
- * HAL_SPI_TxRxCpltCallback) to advance the transfer queue.
+ * Uses interrupt (_IT) or DMA (_DMA) HAL functions depending on the Mode
+ * template parameter. Call TxRxCmpltCb() from the appropriate HAL callbacks
+ * (HAL_SPI_TxCpltCallback, HAL_SPI_RxCpltCallback, HAL_SPI_TxRxCpltCallback)
+ * to advance the transfer queue — the callback mechanism is identical for both
+ * modes.
  *
- * @tparam QueueSize Maximum number of packets that can be queued (default: 25)
+ * @note When using DMA mode, all TX/RX buffers must reside in DMA-accessible
+ * memory. On STM32 F7/H7, this excludes DTCM/ITCM — allocate your
+ * SpiPacketBundle or Buffer objects in a suitable RAM section.
+ *
+ * @tparam Mode Transfer mode: TransferMode::Interrupt (default) or TransferMode::Dma
+ * @tparam QueueSize Maximum number of packets that can be queued (default: 32)
  */
-template <uint8_t QueueSize = 32>
-class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<QueueSize>, QueueSize> {
-  friend class AsyncPacketSender<Stm32AsyncSpiDevice<QueueSize>, SpiPacket, QueueSize>;
+template <TransferMode Mode = TransferMode::Interrupt, uint8_t QueueSize = 32>
+class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<Mode, QueueSize>, QueueSize> {
+  friend class AsyncPacketSender<Stm32AsyncSpiDevice<Mode, QueueSize>, SpiPacket, QueueSize>;
 
  protected:
   SPI_HandleTypeDef *hspi_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
   bool ReadWritePacket(SpiPacket &pkt) {
-    last_status_ = HAL_SPI_TransmitReceive_IT(
-        hspi_, pkt.tx_data->data, pkt.rx_data->data,
-        pkt.tx_data->length);
+    if constexpr (Mode == TransferMode::Dma) {
+      last_status_ = HAL_SPI_TransmitReceive_DMA(
+          hspi_, pkt.tx_data->data, pkt.rx_data->data,
+          pkt.tx_data->length);
+    } else {
+      last_status_ = HAL_SPI_TransmitReceive_IT(
+          hspi_, pkt.tx_data->data, pkt.rx_data->data,
+          pkt.tx_data->length);
+    }
     return last_status_ == HAL_OK;
   }
 
   bool WritePacket(SpiPacket &pkt) {
-    last_status_ = HAL_SPI_Transmit_IT(
-        hspi_, pkt.tx_data->data, pkt.tx_data->length);
+    if constexpr (Mode == TransferMode::Dma) {
+      last_status_ = HAL_SPI_Transmit_DMA(
+          hspi_, pkt.tx_data->data, pkt.tx_data->length);
+    } else {
+      last_status_ = HAL_SPI_Transmit_IT(
+          hspi_, pkt.tx_data->data, pkt.tx_data->length);
+    }
     return last_status_ == HAL_OK;
   }
 
   bool ReadPacket(SpiPacket &pkt) {
-    last_status_ = HAL_SPI_Receive_IT(
-        hspi_, pkt.rx_data->data, pkt.rx_data->length);
+    if constexpr (Mode == TransferMode::Dma) {
+      last_status_ = HAL_SPI_Receive_DMA(
+          hspi_, pkt.rx_data->data, pkt.rx_data->length);
+    } else {
+      last_status_ = HAL_SPI_Receive_IT(
+          hspi_, pkt.rx_data->data, pkt.rx_data->length);
+    }
     return last_status_ == HAL_OK;
   }
 
@@ -178,5 +221,10 @@ class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<QueueSize>, Queu
   /// Get the HAL status from the last transfer
   HAL_StatusTypeDef last_status() const { return last_status_; }
 };
+
+/// @brief Convenience alias for DMA-based async SPI
+/// @tparam QueueSize Maximum number of packets that can be queued (default: 32)
+template <uint8_t QueueSize = 32>
+using Stm32DmaSpiDevice = Stm32AsyncSpiDevice<TransferMode::Dma, QueueSize>;
 
 }  // namespace myl_utils

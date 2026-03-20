@@ -186,3 +186,5 @@ class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt> {
     }
   }
 };
+
+}  // namespace myl_utils

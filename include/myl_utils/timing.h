@@ -24,6 +24,8 @@
 
 #include <cstdint>
 
+namespace myl_utils {
+
 /**
  * @brief CRTP base class for timing / delay operations
  *
@@ -55,3 +57,5 @@ class TimingBase {
   TimingBase() = default;
   ~TimingBase() = default;
 };
+
+}  // namespace myl_utils

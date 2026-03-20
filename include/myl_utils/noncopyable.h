@@ -1,5 +1,7 @@
 #pragma once
 
+namespace myl_utils {
+
 template <typename T>
 class NonCopyable {
  protected:
@@ -35,3 +37,5 @@ class NonCopyable {
    */
   NonCopyable &operator=(NonCopyable &&) = delete;
 };
+
+}  // namespace myl_utils

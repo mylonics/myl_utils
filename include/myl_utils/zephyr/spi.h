@@ -119,3 +119,5 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
   struct spi_config &config() { return config_; }
   const struct spi_config &config() const { return config_; }
 };
+
+}  // namespace myl_utils

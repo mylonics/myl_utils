@@ -24,6 +24,8 @@
 #include <myl_utils/timing.h>
 #include <zephyr/kernel.h>
 
+namespace myl_utils {
+
 /**
  * @brief Zephyr timing implementation
  *
@@ -56,3 +58,5 @@ class ZephyrTiming : public TimingBase<ZephyrTiming> {
     k_sleep(K_MSEC(ms));
   }
 };
+
+}  // namespace myl_utils

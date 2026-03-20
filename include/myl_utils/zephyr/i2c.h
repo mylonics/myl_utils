@@ -107,3 +107,5 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
   /// Get the error code from the last transfer (0 = success)
   int last_error() const { return last_error_; }
 };
+
+}  // namespace myl_utils

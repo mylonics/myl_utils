@@ -26,6 +26,8 @@
 
 #include <cstdint>
 
+namespace myl_utils {
+
 /**
  * @brief CRTP base class for a PWM output channel
  *
@@ -82,3 +84,5 @@ class PwmOutputBase {
   Derived &derived() { return static_cast<Derived &>(*this); }
   const Derived &derived() const { return static_cast<const Derived &>(*this); }
 };
+
+}  // namespace myl_utils

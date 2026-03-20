@@ -31,6 +31,8 @@
 
 #include <cstdint>
 
+namespace myl_utils {
+
 /**
  * @brief CRTP base class for a GPIO output pin
  *
@@ -171,3 +173,5 @@ struct ChipSelectPin {
 
   explicit operator bool() const { return set_fn != NoOp; }
 };
+
+}  // namespace myl_utils

@@ -26,6 +26,8 @@
 #define RX_BUFFER_SIZE 2048
 #define TX_BUFFER_SIZE 2048
 
+namespace myl_utils {
+
 class ZephyrUsbSerialDevice;
 class ZephyrSerialDevice;
 
@@ -363,3 +365,5 @@ class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
   inline static struct k_sem dtr_sem;
 };
 #endif
+
+}  // namespace myl_utils

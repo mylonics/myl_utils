@@ -3,6 +3,8 @@
 #include "buffer.h"
 #include "myl_utils/noncopyable.h"
 
+namespace myl_utils {
+
 class Task : NonCopyable<Task> {
  public:
   uint64_t period_ms_;
@@ -49,3 +51,5 @@ class TaskHandler : NonCopyable<TaskHandler<size>> {
     }
   }
 };
+
+}  // namespace myl_utils

@@ -6,60 +6,26 @@
 
 #include "myl_utils/noncopyable.h"
 
-namespace myl_utils {
-
-template <class T, size_t size>
-class AdcValues {
- public:
-  static const size_t adc_channels_count = size;
-  static constexpr float bit_to_volts_conversion = 3.3 / 4096;
-  bool valid;
-
-  union {
-    T data;
-    uint16_t raw_buffer[adc_channels_count];
-  };
-};
-
-#define DECLARE_ADC_CHANNEL(adc_channel) \
-  static const struct adc_dt_spec adc_channel = ADC_DT_SPEC_GET_BY_NAME(DT_PATH(zephyr_user), adc_channel)
-
-#define PREPEND_UINT16(name) uint16_t name
-
-#define ADC_SEQUENCE_DEFINE(sequence_name, ...)                          \
-  FOR_EACH(DECLARE_ADC_CHANNEL, (;), __VA_ARGS__);                       \
-  static const struct adc_dt_spec sequence_name[] = {__VA_ARGS__};       \
-  static const size_t sequence_name##_count = ARRAY_SIZE(sequence_name); \
-  struct sequence_name##_data {                                          \
-    FOR_EACH(PREPEND_UINT16, (;), __VA_ARGS__);                          \
-  };                                                                     \
-  typedef myl_utils::AdcValues<sequence_name##_data, sequence_name##_count> sequence_name##Values;
-
-#define INIT_ADC_SINGLE_CHANNEL(adc_channel)                \
-  if (!adc_is_ready_dt(&adc_channel)) {                     \
-    return 1;                                               \
-  }                                                         \
-  int adc_channel_err = adc_channel_setup_dt(&adc_channel); \
-  if (adc_channel_err < 0) {                                \
-    return 1;                                               \
-  }
-
-#define ADC_CHANNEL_READ(adc_channel)                      \
-  int adc_channel##_read(uint16_t &data, float conv = 1) { \
-    struct adc_sequence sequence = {                       \
-        .buffer = &data,                                   \
-        .buffer_size = sizeof(data),                       \
-    };                                                     \
-    (void)adc_sequence_init_dt(&adc_channel, &sequence);   \
-    int err = adc_read_dt(&adc_channel, &sequence);        \
-    data = (uint16_t)((float)data * conv);                 \
-    return err;                                            \
-  }
-
 #if !defined(BUFFER_MEM_REGION)
 #define BUFFER_MEM_REGION EMPTY
 #endif
 #define ALIGNMENT_VAR 32
+
+bool ConfigureGpios() __attribute__((weak));
+
+namespace myl_utils {
+
+/** @brief This class configures the GPIOs. This should be one of the first classes called to ensure that devices start
+ * up properly. In order for this class to work, your firmware should define a ConfigureGpios() function.
+ */
+class GpioConfigure : NonCopyable<GpioConfigure> {
+ public:
+  GpioConfigure() {
+    if (ConfigureGpios) {
+      ConfigureGpios();
+    }
+  }
+};
 
 /** @brief This class configures allows for async GPIO read. A class of the following format is required as a templated
  * argument:
@@ -137,7 +103,7 @@ class AdcHandler : NonCopyable<AdcHandler<T>> {
     }
   }
 
-  T Read() {
+  T AdcRead() {
     T data{};
     int ret = k_poll(&event, 1, K_NO_WAIT);
 

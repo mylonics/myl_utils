@@ -27,6 +27,8 @@
 #error "Include your STM32 HAL header (e.g. stm32f4xx_hal.h) before myl_utils/stm32/timing.h"
 #endif
 
+namespace myl_utils {
+
 /**
  * @brief STM32 timing implementation using DWT + HAL_Delay
  *
@@ -76,3 +78,5 @@ class Stm32Timing : public TimingBase<Stm32Timing> {
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
   }
 };
+
+}  // namespace myl_utils

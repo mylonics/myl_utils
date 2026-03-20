@@ -5,6 +5,8 @@
 #include "buffer.h"
 #include "myl_utils/noncopyable.h"
 
+namespace myl_utils {
+
 template <class T, size_t size>
 class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
   static_assert((size & (size - 1)) == 0, "InterruptTxBuffer size must be a power of 2");
@@ -116,3 +118,5 @@ class DmaRxCircularBuffer {
   void (*start_dma_receive_)(T *);
   size_t (*get_write_loc_)();
 };
+
+}  // namespace myl_utils

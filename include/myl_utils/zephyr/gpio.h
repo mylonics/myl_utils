@@ -176,3 +176,5 @@ class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt> {
     user_callback_ = nullptr;
   }
 };
+
+}  // namespace myl_utils

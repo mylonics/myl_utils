@@ -19,6 +19,8 @@
 #include "myl_utils/noncopyable.h"
 #include <cstdint>
 
+namespace myl_utils {
+
 /**
  * @brief Specifies the type of SPI/I2C transfer to perform
  */
@@ -173,16 +175,16 @@ struct I2cPacketBundle {
 
 // Legacy macros — prefer SpiPacketBundle<Size> / I2cPacketBundle<Size> instead
 #define PACKET_HELPER(name, size) \
-  Buffer<size> name##_tx_;        \
-  Buffer<size> name##_rx_;
+  myl_utils::Buffer<size> name##_tx_;        \
+  myl_utils::Buffer<size> name##_rx_;
 
 #define I2C_PACKET_HELPER(name, size) \
   PACKET_HELPER(name, size)           \
-  I2cPacket name{&name##_tx_, &name##_rx_};
+  myl_utils::I2cPacket name{&name##_tx_, &name##_rx_};
 
 #define SPI_PACKET_HELPER(name, size) \
   PACKET_HELPER(name, size)           \
-  SpiPacket name{&name##_tx_, &name##_rx_};
+  myl_utils::SpiPacket name{&name##_tx_, &name##_rx_};
 
 /**
  * @brief CRTP base class for asynchronous packet-based transfers
@@ -211,9 +213,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
   /// @note Access from both thread and ISR context — volatile is sufficient on ARM Cortex-M
   volatile bool busy_{};
 
-  static constexpr bool is_sync = false;
-
  public:
+  static constexpr bool is_sync = false;
   /**
    * @brief Queue a packet for transfer
    * @param pkt Packet to transfer
@@ -306,10 +307,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
  */
 template <class Derived, class DataPacket>
 class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
- protected:
-  static constexpr bool is_sync = true;
-
  public:
+  static constexpr bool is_sync = true;
   /**
    * @brief Execute a packet transfer (blocking)
    * @param pkt Packet to transfer
@@ -499,3 +498,5 @@ class I2cDevice {
   Transport &transport() { return transport_; }
   const Transport &transport() const { return transport_; }
 };
+
+}  // namespace myl_utils

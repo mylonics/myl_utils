@@ -14,6 +14,8 @@
 #define NVS_PARTITION_DEVICE FIXED_PARTITION_DEVICE(NVS_PARTITION)
 #define NVS_PARTITION_OFFSET FIXED_PARTITION_OFFSET(NVS_PARTITION)
 
+namespace myl_utils {
+
 /** @brief This class sets up a nonvolatile memory. It expects a storage partition to be defined in the board dts file.
  *
  */
@@ -71,3 +73,5 @@ class NvmController : public NvmInterface {
  private:
   struct nvs_fs fs;
 };
+
+}  // namespace myl_utils

@@ -31,6 +31,8 @@
 #error "Include your STM32 HAL header (e.g. stm32f4xx_hal.h) before myl_utils/stm32/pwm.h"
 #endif
 
+namespace myl_utils {
+
 /**
  * @brief STM32 HAL PWM output channel
  *
@@ -120,3 +122,5 @@ class Stm32PwmOutput : public PwmOutputBase<Stm32PwmOutput> {
   /// Direct access to set ARR (auto-reload) value in raw timer ticks
   void SetPeriodTicks(uint32_t ticks) { htim_->Instance->ARR = ticks - 1; }
 };
+
+}  // namespace myl_utils

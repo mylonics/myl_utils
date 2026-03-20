@@ -24,6 +24,8 @@
 #include <myl_utils/pwm.h>
 #include <zephyr/drivers/pwm.h>
 
+namespace myl_utils {
+
 /**
  * @brief Zephyr PWM output channel
  *
@@ -79,3 +81,5 @@ class ZephyrPwmOutput : public PwmOutputBase<ZephyrPwmOutput> {
     return pwm_set_dt(&spec_, period_ns, pulse_ns) == 0;
   }
 };
+
+}  // namespace myl_utils

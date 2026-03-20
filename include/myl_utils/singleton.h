@@ -1,5 +1,7 @@
 #pragma once
 
+namespace myl_utils {
+
 template <typename T>
 class Singleton {
  public:
@@ -16,3 +18,5 @@ class Singleton {
   Singleton(Singleton const&) = delete;
   Singleton& operator=(Singleton const&) = delete;
 };
+
+}  // namespace myl_utils

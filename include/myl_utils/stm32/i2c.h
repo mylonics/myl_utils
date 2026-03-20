@@ -57,6 +57,8 @@
 #error "Include your STM32 HAL header (e.g. stm32f4xx_hal.h) before myl_utils/stm32/i2c.h"
 #endif
 
+namespace myl_utils {
+
 /**
  * @brief Synchronous STM32 HAL I2C device implementation
  *
@@ -214,3 +216,5 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<QueueSize>, Queu
   /// Get the HAL status from the last transfer
   HAL_StatusTypeDef last_status() const { return last_status_; }
 };
+
+}  // namespace myl_utils

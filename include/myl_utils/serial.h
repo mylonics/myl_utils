@@ -2,6 +2,8 @@
 
 #include "buffer.h"
 
+namespace myl_utils {
+
 enum class UartBaud {
   B_1200 = 0,
   B_2400 = 1,
@@ -104,3 +106,5 @@ class SerialRepeater {
   SerialPort &ser1_;
   SerialPort &ser2_;
 };
+
+}  // namespace myl_utils

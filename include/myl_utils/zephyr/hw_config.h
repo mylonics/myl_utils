@@ -12,8 +12,8 @@
 /** @brief This macro helps call a function during static initialization.
  */
 
-#define CALL_FUNCTION_ON_STATIC_INIT(function)             \
-  class function##_class : NonCopyable<function##_class> { \
+#define CALL_FUNCTION_ON_STATIC_INIT(function)                                      \
+  class function##_class : myl_utils::NonCopyable<function##_class> { \
    public:                                                 \
     function##_class() { function(); }                     \
   };                                                       \

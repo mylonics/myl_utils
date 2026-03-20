@@ -3,6 +3,8 @@
 // #include "cmsis_gcc.h"
 #include "myl_utils/noncopyable.h"
 
+namespace myl_utils {
+
 template <class T, size_t size>
 class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {
   static_assert((size & (size - 1)) == 0, "CircularBuffer size must be a power of 2");
@@ -36,3 +38,5 @@ class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {
   volatile size_t wloc_;
   volatile size_t rloc_;
 };
+
+}  // namespace myl_utils

@@ -134,20 +134,33 @@ enum class TransferMode : uint8_t {
  * polarity, phase) are typically set automatically by the SpiDevice wrapper.
  */
 struct SpiPacket {
+  // --- Pointer-aligned fields first (no internal padding holes) -------
   Data *tx_data{};               ///< TX buffer (nullptr if unused)
   Data *rx_data{};               ///< RX buffer (nullptr if unused)
-  PacketType type{PacketType::Write};
   ChipSelectPin chip_select{};   ///< Optional chip select GPIO (type-erased, no virtual)
   void (*callback)(Data &){};    ///< Optional completion callback
+  // --- Byte-sized fields grouped together at the end ------------------
+  PacketType type{PacketType::Write};
   SpiPolarity polarity{SpiPolarity::Low};   ///< Clock polarity (set by SpiDevice wrapper)
   SpiPhase phase{SpiPhase::Leading};        ///< Clock phase (set by SpiDevice wrapper)
 
   /// Factory methods for creating typed packets (avoids fragile aggregate initialization)
-  static SpiPacket WriteOnly(Data &tx) { return {&tx, nullptr, PacketType::Write}; }
-  static SpiPacket ReadOnly(Data &rx) { return {nullptr, &rx, PacketType::Read}; }
-  static SpiPacket FullDuplex(Data &tx, Data &rx) { return {&tx, &rx, PacketType::WriteAndRead}; }
-  static SpiPacket RegRead(Data &tx, Data &rx) { return {&tx, &rx, PacketType::WriteThenRead}; }
+  static SpiPacket WriteOnly(Data &tx) {
+    SpiPacket p{}; p.tx_data = &tx; p.type = PacketType::Write; return p;
+  }
+  static SpiPacket ReadOnly(Data &rx) {
+    SpiPacket p{}; p.rx_data = &rx; p.type = PacketType::Read; return p;
+  }
+  static SpiPacket FullDuplex(Data &tx, Data &rx) {
+    SpiPacket p{}; p.tx_data = &tx; p.rx_data = &rx; p.type = PacketType::WriteAndRead; return p;
+  }
+  static SpiPacket RegRead(Data &tx, Data &rx) {
+    SpiPacket p{}; p.tx_data = &tx; p.rx_data = &rx; p.type = PacketType::WriteThenRead; return p;
+  }
 };
+
+static_assert(sizeof(SpiPacket) == 6 * sizeof(void *),
+              "SpiPacket has unexpected padding — check for stray #pragma pack");
 
 /**
  * @brief I2C transfer packet containing buffer pointers and transfer configuration
@@ -157,18 +170,29 @@ struct SpiPacket {
  * by the I2cDevice wrapper.
  */
 struct I2cPacket {
+  // --- Pointer-aligned fields first (no internal padding holes) -------
   Data *tx_data{};               ///< TX buffer (nullptr if unused)
   Data *rx_data{};               ///< RX buffer (nullptr if unused)
+  void (*callback)(Data &){};    ///< Optional completion callback
+  // --- Byte-sized fields grouped together at the end ------------------
   uint8_t addr{};                ///< I2C device address (set by I2cDevice wrapper)
   PacketType type{PacketType::Write};
-  void (*callback)(Data &){};    ///< Optional completion callback
 
   /// Factory methods for creating typed packets (avoids fragile aggregate initialization)
   /// @note No FullDuplex — I2C is half-duplex; use RegRead for register read patterns
-  static I2cPacket WriteOnly(Data &tx) { return {&tx, nullptr, 0, PacketType::Write}; }
-  static I2cPacket ReadOnly(Data &rx) { return {nullptr, &rx, 0, PacketType::Read}; }
-  static I2cPacket RegRead(Data &tx, Data &rx) { return {&tx, &rx, 0, PacketType::WriteThenRead}; }
+  static I2cPacket WriteOnly(Data &tx) {
+    I2cPacket p{}; p.tx_data = &tx; p.type = PacketType::Write; return p;
+  }
+  static I2cPacket ReadOnly(Data &rx) {
+    I2cPacket p{}; p.rx_data = &rx; p.type = PacketType::Read; return p;
+  }
+  static I2cPacket RegRead(Data &tx, Data &rx) {
+    I2cPacket p{}; p.tx_data = &tx; p.rx_data = &rx; p.type = PacketType::WriteThenRead; return p;
+  }
 };
+
+static_assert(sizeof(I2cPacket) == 4 * sizeof(void *),
+              "I2cPacket has unexpected padding — check for stray #pragma pack");
 
 /**
  * @brief Type-safe SPI packet bundle with TX/RX buffers

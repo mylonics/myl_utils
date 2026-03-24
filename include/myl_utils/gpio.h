@@ -31,6 +31,7 @@
 
 #include "config.h"
 #include <cstdint>
+#include <type_traits>
 
 namespace myl_utils {
 
@@ -178,7 +179,9 @@ struct ChipSelectPin {
   /// @param active_low If true (default), Set(true) drives the pin LOW
   ///                   (standard SPI chip-select convention).
   ///                   If false, Set(true) drives the pin HIGH.
-  template <typename Gpio>
+  template <typename Gpio,
+            typename = std::enable_if_t<
+                !std::is_same_v<std::decay_t<Gpio>, ChipSelectPin>>>
   explicit ChipSelectPin(Gpio &gpio, bool active_low = true)
       : instance(&gpio),
         set_fn(active_low ? &TrampolineActiveLow<Gpio> : &Trampoline<Gpio>) {}

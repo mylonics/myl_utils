@@ -24,6 +24,7 @@
  * @endcode
  */
 
+#include "config.h"
 #include <cstdint>
 
 namespace myl_utils {
@@ -47,7 +48,7 @@ class PwmOutputBase {
    * @param period Full cycle period in implementation-defined units
    * @return true on success
    */
-  bool SetDutyCycle(uint32_t pulse, uint32_t period) {
+  MYL_NOINLINE bool SetDutyCycle(uint32_t pulse, uint32_t period) {
     return derived().SetDutyCycle(pulse, period);
   }
 
@@ -57,7 +58,7 @@ class PwmOutputBase {
    * @param pulse_us Pulse width (on-time) in microseconds
    * @return true on success
    */
-  bool SetPeriodAndDuty(uint32_t period_us, uint32_t pulse_us) {
+  MYL_NOINLINE bool SetPeriodAndDuty(uint32_t period_us, uint32_t pulse_us) {
     return derived().SetPeriodAndDuty(period_us, pulse_us);
   }
 
@@ -67,14 +68,14 @@ class PwmOutputBase {
    * @param period_us Period in microseconds (default: keep current period)
    * @return true on success
    */
-  bool SetDutyPercent(uint8_t percent, uint32_t period_us = 0) {
+  MYL_NOINLINE bool SetDutyPercent(uint8_t percent, uint32_t period_us = 0) {
     return derived().SetDutyPercent(percent, period_us);
   }
 
   /**
    * @brief Stop PWM output (set pulse to 0)
    */
-  void Stop() { derived().Stop(); }
+  MYL_NOINLINE void Stop() { derived().Stop(); }
 
  protected:
   PwmOutputBase() = default;

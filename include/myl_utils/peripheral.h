@@ -15,6 +15,7 @@
  */
 
 #include "buffer.h"
+#include "config.h"
 #include "gpio.h"
 #include "myl_utils/noncopyable.h"
 #include <cstdint>
@@ -236,7 +237,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
    * @param pkt Packet to transfer
    * @return true if packet was accepted, false if queue is full
    */
-  [[nodiscard]] bool ProcessCommand(DataPacket &pkt) { return QueuePacket(pkt); }
+  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(DataPacket &pkt) { return QueuePacket(pkt); }
 
   /**
    * @brief Call from interrupt handler when transfer completes
@@ -247,7 +248,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
    * If the read phase of a WriteThenRead fails to start, falls through
    * to cleanup (ChipSelect deassert, callback, next packet).
    */
-  void TxRxCmpltCb() {
+  MYL_NOINLINE void TxRxCmpltCb() {
     if (current_command_->type == PacketType::WriteThenRead && write_and_read_pkt_) {
       write_and_read_pkt_ = false;
       if (derived().ReadPacket(*current_command_)) return;
@@ -274,7 +275,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 
   Derived &derived() { return static_cast<Derived &>(*this); }
 
-  bool QueuePacket(DataPacket &pkt) {
+  MYL_NOINLINE bool QueuePacket(DataPacket &pkt) {
     if (busy_) {
       if (!pkt_queue_.Writable()) return false;
       pkt_queue_.Put(&pkt);
@@ -284,7 +285,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
     }
   }
 
-  bool SendPacket(DataPacket &pkt) {
+  MYL_NOINLINE bool SendPacket(DataPacket &pkt) {
     busy_ = true;
     write_and_read_pkt_ = false;
     current_command_ = &pkt;
@@ -338,14 +339,14 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
    * @param pkt Packet to transfer
    * @return true if the transfer succeeded, false on hardware error
    */
-  [[nodiscard]] bool ProcessCommand(DataPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(DataPacket &pkt) {
     return SendPacket(pkt);
   }
 
  private:
   Derived &derived() { return static_cast<Derived &>(*this); }
 
-  bool SendPacket(DataPacket &pkt) {
+  MYL_NOINLINE bool SendPacket(DataPacket &pkt) {
     bool ok = true;
     derived().ChipSelect(pkt, true);
     switch (pkt.type) {

@@ -29,6 +29,7 @@
  * @endcode
  */
 
+#include "config.h"
 #include <cstdint>
 
 namespace myl_utils {
@@ -48,12 +49,12 @@ class GpioOutputBase {
    * @brief Drive the pin high or low
    * @param state true = logic high (active), false = logic low (inactive)
    */
-  void Set(bool state) { derived().Set(state); }
+  MYL_NOINLINE void Set(bool state) { derived().Set(state); }
 
   /**
    * @brief Toggle the pin state
    */
-  void Toggle() { derived().Toggle(); }
+  MYL_NOINLINE void Toggle() { derived().Toggle(); }
 
  protected:
   GpioOutputBase() = default;
@@ -78,7 +79,7 @@ class GpioInputBase {
    * @brief Read the current logic level of the pin
    * @return true if the pin is logic high, false if logic low
    */
-  bool Read() { return derived().Read(); }
+  MYL_NOINLINE bool Read() { return derived().Read(); }
 
  protected:
   GpioInputBase() = default;
@@ -127,14 +128,14 @@ class GpioInterruptBase : public GpioInputBase<Derived> {
    * @param callback Function to call from ISR context when triggered
    * @return true if successfully configured, false on error
    */
-  bool EnableInterrupt(Edge edge, void (*callback)()) {
+  MYL_NOINLINE bool EnableInterrupt(Edge edge, void (*callback)()) {
     return derived().EnableInterrupt(edge, callback);
   }
 
   /**
    * @brief Disable the interrupt on this pin
    */
-  void DisableInterrupt() { derived().DisableInterrupt(); }
+  MYL_NOINLINE void DisableInterrupt() { derived().DisableInterrupt(); }
 
  protected:
   GpioInterruptBase() = default;
@@ -166,12 +167,20 @@ struct ChipSelectPin {
   /// Construct from any GPIO type that has a Set(bool) method
   template <typename Gpio>
   explicit ChipSelectPin(Gpio &gpio)
-      : instance(&gpio),
-        set_fn([](void *p, bool state) { static_cast<Gpio *>(p)->Set(state); }) {}
+      : instance(&gpio), set_fn(&Trampoline<Gpio>) {}
 
-  void Set(bool state) const { set_fn(instance, state); }
+  MYL_NOINLINE void Set(bool state) const { set_fn(instance, state); }
 
   explicit operator bool() const { return set_fn != NoOp; }
+
+ private:
+  /// Named trampoline so each GPIO type gets a real debuggable symbol
+  /// (e.g. ChipSelectPin::Trampoline<ZephyrGpioOutput>) instead of a
+  /// compiler-generated lambda name.
+  template <typename Gpio>
+  MYL_NOINLINE static void Trampoline(void *p, bool state) {
+    static_cast<Gpio *>(p)->Set(state);
+  }
 };
 
 }  // namespace myl_utils

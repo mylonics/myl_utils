@@ -1,6 +1,7 @@
 #pragma once
 
 // #include "cmsis_gcc.h"
+#include "config.h"
 #include "myl_utils/noncopyable.h"
 
 namespace myl_utils {
@@ -11,27 +12,27 @@ class CircularBuffer : NonCopyable<CircularBuffer<T, size>> {
   static constexpr size_t mask_ = size - 1;
 
  public:
-  void Put(T item) {
+  MYL_ISR_NOINLINE void Put(T item) {
     buf_[wloc_] = item;
     //__DSB();
     wloc_ = (wloc_ + 1) & mask_;
   }
 
-  T Get() {
+  MYL_ISR_NOINLINE T Get() {
     T item = buf_[rloc_];
     //__DSB();
     rloc_ = (rloc_ + 1) & mask_;
     return item;
   }
 
-  void Reset() {
+  MYL_ISR_NOINLINE void Reset() {
     wloc_ = 0;
     rloc_ = 0;
   }
 
-  bool Readable() { return wloc_ != rloc_; }
+  MYL_ISR_NOINLINE bool Readable() { return wloc_ != rloc_; }
 
-  bool Writable() { return ((wloc_ + 1) & mask_) != rloc_; }
+  MYL_ISR_NOINLINE bool Writable() { return ((wloc_ + 1) & mask_) != rloc_; }
 
  private:
   T buf_[size];

@@ -27,6 +27,7 @@
  * @endcode
  */
 
+#include "config.h"
 #include <cstdint>
 
 namespace myl_utils {
@@ -54,7 +55,7 @@ class HwTimerBase {
    * @param time_us Delay in microseconds (must be > 0)
    * @return true if the timer was started
    */
-  bool StartUs(uint32_t time_us) {
+  MYL_NOINLINE bool StartUs(uint32_t time_us) {
     return derived().StartUs(time_us);
   }
 
@@ -66,7 +67,7 @@ class HwTimerBase {
    * @param period Raw tick count
    * @return true if the timer was started
    */
-  bool StartWithPeriod(uint32_t period) {
+  MYL_NOINLINE bool StartWithPeriod(uint32_t period) {
     return derived().StartWithPeriod(period);
   }
 
@@ -76,20 +77,20 @@ class HwTimerBase {
    * Disables the timer and its interrupt. Safe to call even if the
    * timer is not currently running.
    */
-  void Stop() { derived().Stop(); }
+  MYL_NOINLINE void Stop() { derived().Stop(); }
 
   /**
    * @brief Call from the timer's interrupt handler
    *
    * Disables the timer (making it one-shot) and invokes the user callback.
    */
-  void OnInterrupt() { derived().OnInterrupt(); }
+  MYL_NOINLINE void OnInterrupt() { derived().OnInterrupt(); }
 
   /**
    * @brief Set or replace the completion callback
    * @param cb Function called when the one-shot fires (ISR context)
    */
-  void SetCallback(Callback cb) { derived().SetCallback(cb); }
+  MYL_NOINLINE void SetCallback(Callback cb) { derived().SetCallback(cb); }
 
  protected:
   HwTimerBase() = default;

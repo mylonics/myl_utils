@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "buffer.h"
+#include "config.h"
 #include "myl_utils/noncopyable.h"
 
 namespace myl_utils {
@@ -16,7 +17,7 @@ class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
   explicit InterruptTxBuffer(void (*transmit_function)(T *, size_t))
       : transmit_function_(transmit_function) {}
 
-  void Put(T item) {
+  MYL_ISR_NOINLINE void Put(T item) {
     loading_ = true;
     __DSB();
     buf_[wloc_] = item;
@@ -32,7 +33,7 @@ class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
 
   void Reset() { wloc_ = 0; }
 
-  void StartTransfer() {
+  MYL_ISR_NOINLINE void StartTransfer() {
     if (!loading_ && wloc_) {
       memcpy(transmitbuf_, buf_, wloc_);
       transmit_function_(transmitbuf_, wloc_);
@@ -61,15 +62,15 @@ class InterruptRxCircularBuffer {
   explicit InterruptRxCircularBuffer(void (*enable_rx_interrupt)(T *))
       : enable_rx_interrupt_(enable_rx_interrupt) {}
 
-  void Start() { Prime(); }
+  MYL_ISR_NOINLINE void Start() { Prime(); }
 
-  T Get() { return buffer.Get(); }
+  MYL_ISR_NOINLINE T Get() { return buffer.Get(); }
 
-  void Reset() { buffer.Reset(); }
+  MYL_ISR_NOINLINE void Reset() { buffer.Reset(); }
 
-  bool Readable() { return buffer.Readable(); }
+  MYL_ISR_NOINLINE bool Readable() { return buffer.Readable(); }
 
-  void Put() {
+  MYL_ISR_NOINLINE void Put() {
     buffer.Put(incoming_byte_);
     Prime();
   }
@@ -92,16 +93,16 @@ class DmaRxCircularBuffer {
   DmaRxCircularBuffer(void (*start_dma_receive)(T *), size_t (*get_write_loc)())
       : start_dma_receive_(start_dma_receive), get_write_loc_(get_write_loc) {}
 
-  void Start() { start_dma_receive_(buf_); }
+  MYL_ISR_NOINLINE void Start() { start_dma_receive_(buf_); }
 
-  T Get() {
+  MYL_ISR_NOINLINE T Get() {
     T item = buf_[rloc_];
     __DSB();
     rloc_ = (rloc_ + 1) & mask_;
     return item;
   }
 
-  bool Readable() {
+  MYL_ISR_NOINLINE bool Readable() {
     UpdateWLoc();
     return wloc_ != rloc_;
   }

@@ -21,7 +21,7 @@
  * SpiDevice<Stm32SpiDevice> sensor(spi, cs);
  *
  * // For an active-high CS device:
- * // ChipSelectPin cs(cs_gpio, /*active_low=*/false);
+ * // ChipSelectPin cs(cs_gpio, false);  // active_low = false
  *
  * // Create and configure buffers
  * Buffer<16> tx;

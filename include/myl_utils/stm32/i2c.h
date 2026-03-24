@@ -106,7 +106,7 @@ class Stm32I2cDevice : public I2c<Stm32I2cDevice> {
    * Falls back to separate Transmit + Receive when TX length > 2 bytes
    * (exceeds HAL_I2C_Mem_Read's MemAddSize).
    */
-  bool ReadWritePacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(I2cPacket &pkt) {
     uint16_t addr = HalAddr(pkt.addr);
     uint16_t tx_len = pkt.tx_data->length;
     if (tx_len <= 2) {
@@ -132,21 +132,21 @@ class Stm32I2cDevice : public I2c<Stm32I2cDevice> {
     return last_status_ == HAL_OK;
   }
 
-  bool WritePacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Transmit(
         hi2c_, HalAddr(pkt.addr),
         pkt.tx_data->data, pkt.tx_data->length, timeout_);
     return last_status_ == HAL_OK;
   }
 
-  bool ReadPacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Receive(
         hi2c_, HalAddr(pkt.addr),
         pkt.rx_data->data, pkt.rx_data->length, timeout_);
     return last_status_ == HAL_OK;
   }
 
-  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
+  MYL_NOINLINE void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
     // I2C does not use chip select — addressing is handled via the packet address
   }
 
@@ -195,7 +195,7 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<Mode, QueueSize>
    * When falling back, the read phase is handled by the AsyncPacketSender's
    * WriteThenRead sequencing via TxRxCmpltCb().
    */
-  bool ReadWritePacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(I2cPacket &pkt) {
     uint16_t addr = HalAddr(pkt.addr);
     uint16_t tx_len = pkt.tx_data->length;
     if (tx_len <= 2) {
@@ -227,7 +227,7 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<Mode, QueueSize>
     return last_status_ == HAL_OK;
   }
 
-  bool WritePacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(I2cPacket &pkt) {
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_I2C_Master_Transmit_DMA(
           hi2c_, HalAddr(pkt.addr),
@@ -240,7 +240,7 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<Mode, QueueSize>
     return last_status_ == HAL_OK;
   }
 
-  bool ReadPacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(I2cPacket &pkt) {
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_I2C_Master_Receive_DMA(
           hi2c_, HalAddr(pkt.addr),
@@ -253,7 +253,7 @@ class Stm32AsyncI2cDevice : public AsyncI2c<Stm32AsyncI2cDevice<Mode, QueueSize>
     return last_status_ == HAL_OK;
   }
 
-  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
+  MYL_NOINLINE void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
     // I2C does not use chip select
   }
 

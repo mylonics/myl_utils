@@ -49,11 +49,11 @@ class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput> {
     gpio_pin_configure_dt(&spec_, initial_state ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
   }
 
-  void Set(bool state) {
+  MYL_NOINLINE void Set(bool state) {
     gpio_pin_set_dt(&spec_, state);
   }
 
-  void Toggle() {
+  MYL_NOINLINE void Toggle() {
     gpio_pin_toggle_dt(&spec_);
   }
 };
@@ -77,7 +77,7 @@ class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput> {
     gpio_pin_configure_dt(&spec_, GPIO_INPUT);
   }
 
-  bool Read() {
+  MYL_NOINLINE bool Read() {
     return gpio_pin_get_dt(&spec_) != 0;
   }
 };
@@ -104,15 +104,15 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin> {
         (initial_state ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE) | GPIO_INPUT);
   }
 
-  void Set(bool state) {
+  MYL_NOINLINE void Set(bool state) {
     gpio_pin_set_dt(&spec_, state);
   }
 
-  void Toggle() {
+  MYL_NOINLINE void Toggle() {
     gpio_pin_toggle_dt(&spec_);
   }
 
-  bool Read() {
+  MYL_NOINLINE bool Read() {
     return gpio_pin_get_dt(&spec_) != 0;
   }
 };
@@ -150,11 +150,11 @@ class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt> {
     gpio_pin_configure_dt(&spec_, GPIO_INPUT);
   }
 
-  bool Read() {
+  MYL_NOINLINE bool Read() {
     return gpio_pin_get_dt(&spec_) != 0;
   }
 
-  bool EnableInterrupt(Edge edge, void (*callback)()) {
+  MYL_NOINLINE bool EnableInterrupt(Edge edge, void (*callback)()) {
     user_callback_ = callback;
 
     gpio_flags_t zephyr_edge{};
@@ -172,7 +172,7 @@ class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt> {
     return true;
   }
 
-  void DisableInterrupt() {
+  MYL_NOINLINE void DisableInterrupt() {
     gpio_pin_interrupt_configure_dt(&spec_, GPIO_INT_DISABLE);
     gpio_remove_callback(spec_.port, &cb_data_);
     user_callback_ = nullptr;

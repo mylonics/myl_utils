@@ -468,7 +468,7 @@ class SpiDevice {
   }
 
   /// Stamp packet with device config and forward to transport
-  [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(SpiPacket &pkt) {
     pkt.chip_select = chip_select_;
     pkt.polarity = polarity_;
     pkt.phase = phase_;
@@ -519,7 +519,7 @@ class DualSpiDevice {
   SpiPolarity polarity_{SpiPolarity::Low};
   SpiPhase phase_{SpiPhase::Leading};
 
-  void StampPacket(SpiPacket &pkt) {
+  MYL_NOINLINE void StampPacket(SpiPacket &pkt) {
     pkt.chip_select = chip_select_;
     pkt.polarity = polarity_;
     pkt.phase = phase_;
@@ -550,13 +550,13 @@ class DualSpiDevice {
   }
 
   /// Queue an async transfer via the async transport (DMA/IT). Packet must outlive the transfer.
-  [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(SpiPacket &pkt) {
     StampPacket(pkt);
     return async_transport_.ProcessCommand(pkt);
   }
 
   /// Execute a blocking transfer via the sync transport
-  [[nodiscard]] bool SyncProcessCommand(SpiPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool SyncProcessCommand(SpiPacket &pkt) {
     StampPacket(pkt);
     return sync_transport_.ProcessCommand(pkt);
   }
@@ -598,7 +598,7 @@ class I2cDevice {
       : transport_(transport), addr_(addr), callback_(cb) {}
 
   /// Stamp packet with device config and forward to transport
-  [[nodiscard]] bool ProcessCommand(I2cPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(I2cPacket &pkt) {
     pkt.addr = addr_;
     if (!pkt.callback) pkt.callback = callback_;
     return transport_.ProcessCommand(pkt);
@@ -628,7 +628,7 @@ class DualI2cDevice {
   uint8_t addr_{};
   void (*callback_)(Data &){};
 
-  void StampPacket(I2cPacket &pkt) {
+  MYL_NOINLINE void StampPacket(I2cPacket &pkt) {
     pkt.addr = addr_;
     if (!pkt.callback) pkt.callback = callback_;
   }
@@ -640,13 +640,13 @@ class DualI2cDevice {
         addr_(addr), callback_(cb) {}
 
   /// Queue an async transfer via the async transport. Packet must outlive the transfer.
-  [[nodiscard]] bool ProcessCommand(I2cPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(I2cPacket &pkt) {
     StampPacket(pkt);
     return async_transport_.ProcessCommand(pkt);
   }
 
   /// Execute a blocking transfer via the sync transport
-  [[nodiscard]] bool SyncProcessCommand(I2cPacket &pkt) {
+  [[nodiscard]] MYL_NOINLINE bool SyncProcessCommand(I2cPacket &pkt) {
     StampPacket(pkt);
     return sync_transport_.ProcessCommand(pkt);
   }

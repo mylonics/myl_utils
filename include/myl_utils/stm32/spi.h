@@ -99,26 +99,26 @@ class Stm32SpiDevice : public Spi<Stm32SpiDevice> {
   uint32_t timeout_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
-  bool ReadWritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_TransmitReceive(
         hspi_, pkt.tx_data->data, pkt.rx_data->data,
         pkt.tx_data->length, timeout_);
     return last_status_ == HAL_OK;
   }
 
-  bool WritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Transmit(
         hspi_, pkt.tx_data->data, pkt.tx_data->length, timeout_);
     return last_status_ == HAL_OK;
   }
 
-  bool ReadPacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Receive(
         hspi_, pkt.rx_data->data, pkt.rx_data->length, timeout_);
     return last_status_ == HAL_OK;
   }
 
-  void ChipSelect(SpiPacket &pkt, bool enable) {
+  MYL_NOINLINE void ChipSelect(SpiPacket &pkt, bool enable) {
     if (enable) {
       uint32_t target_cpol = (pkt.polarity == SpiPolarity::High) ? SPI_POLARITY_HIGH : SPI_POLARITY_LOW;
       uint32_t target_cpha = (pkt.phase == SpiPhase::Trailing) ? SPI_PHASE_2EDGE : SPI_PHASE_1EDGE;
@@ -168,7 +168,7 @@ class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<Mode, QueueSize>
   SPI_HandleTypeDef *hspi_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
-  bool ReadWritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(SpiPacket &pkt) {
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_SPI_TransmitReceive_DMA(
           hspi_, pkt.tx_data->data, pkt.rx_data->data,
@@ -181,7 +181,7 @@ class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<Mode, QueueSize>
     return last_status_ == HAL_OK;
   }
 
-  bool WritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(SpiPacket &pkt) {
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_SPI_Transmit_DMA(
           hspi_, pkt.tx_data->data, pkt.tx_data->length);
@@ -192,7 +192,7 @@ class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<Mode, QueueSize>
     return last_status_ == HAL_OK;
   }
 
-  bool ReadPacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(SpiPacket &pkt) {
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_SPI_Receive_DMA(
           hspi_, pkt.rx_data->data, pkt.rx_data->length);
@@ -203,7 +203,7 @@ class Stm32AsyncSpiDevice : public AsyncSpi<Stm32AsyncSpiDevice<Mode, QueueSize>
     return last_status_ == HAL_OK;
   }
 
-  void ChipSelect(SpiPacket &pkt, bool enable) {
+  MYL_NOINLINE void ChipSelect(SpiPacket &pkt, bool enable) {
     if (enable) {
       uint32_t target_cpol = (pkt.polarity == SpiPolarity::High) ? SPI_POLARITY_HIGH : SPI_POLARITY_LOW;
       uint32_t target_cpha = (pkt.phase == SpiPhase::Trailing) ? SPI_PHASE_2EDGE : SPI_PHASE_1EDGE;

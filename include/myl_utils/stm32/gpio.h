@@ -56,11 +56,11 @@ class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput> {
   Stm32GpioOutput(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  void Set(bool state) {
+  MYL_NOINLINE void Set(bool state) {
     HAL_GPIO_WritePin(port_, pin_, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
   }
 
-  void Toggle() {
+  MYL_NOINLINE void Toggle() {
     HAL_GPIO_TogglePin(port_, pin_);
   }
 };
@@ -83,7 +83,7 @@ class Stm32GpioInput : public GpioInputBase<Stm32GpioInput> {
   Stm32GpioInput(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  bool Read() {
+  MYL_NOINLINE bool Read() {
     return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET;
   }
 };
@@ -109,15 +109,15 @@ class Stm32GpioPin : public GpioPinBase<Stm32GpioPin> {
   Stm32GpioPin(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  void Set(bool state) {
+  MYL_NOINLINE void Set(bool state) {
     HAL_GPIO_WritePin(port_, pin_, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
   }
 
-  void Toggle() {
+  MYL_NOINLINE void Toggle() {
     HAL_GPIO_TogglePin(port_, pin_);
   }
 
-  bool Read() {
+  MYL_NOINLINE bool Read() {
     return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET;
   }
 };
@@ -162,18 +162,18 @@ class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt> {
   Stm32GpioInterrupt(GPIO_TypeDef *port, uint16_t pin)
       : port_(port), pin_(pin) {}
 
-  bool Read() {
+  MYL_NOINLINE bool Read() {
     return HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET;
   }
 
-  bool EnableInterrupt(Edge /*edge*/, void (*callback)()) {
+  MYL_NOINLINE bool EnableInterrupt(Edge /*edge*/, void (*callback)()) {
     // Edge configuration is handled by CubeMX / HAL_GPIO_Init.
     // We just register the callback here.
     callbacks_[PinIndex(pin_)] = callback;
     return true;
   }
 
-  void DisableInterrupt() {
+  MYL_NOINLINE void DisableInterrupt() {
     callbacks_[PinIndex(pin_)] = nullptr;
   }
 

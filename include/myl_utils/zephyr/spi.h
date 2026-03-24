@@ -89,7 +89,7 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
     return last_error_ == 0;
   }
 
-  bool ReadWritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
@@ -97,19 +97,19 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
     return StartTransfer(&tx_set, &rx_set);
   }
 
-  bool WritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
     return StartTransfer(&tx_set, nullptr);
   }
 
-  bool ReadPacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(SpiPacket &pkt) {
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set rx_set = {&rx_buf, 1};
     return StartTransfer(nullptr, &rx_set);
   }
 
-  void ChipSelect(SpiPacket &pkt, bool enable) {
+  MYL_NOINLINE void ChipSelect(SpiPacket &pkt, bool enable) {
     if (enable) {
       uint16_t new_op = config_.operation;
       if (pkt.polarity == SpiPolarity::High) {
@@ -199,23 +199,23 @@ class ZephyrAsyncSpiDevice : public AsyncSpi<ZephyrAsyncSpiDevice<QueueSize>, Qu
     return last_error_ == 0;
   }
 
-  bool ReadWritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     return StartAsyncTransfer(&tx_buf, &rx_buf);
   }
 
-  bool WritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     return StartAsyncTransfer(&tx_buf, nullptr);
   }
 
-  bool ReadPacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(SpiPacket &pkt) {
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     return StartAsyncTransfer(nullptr, &rx_buf);
   }
 
-  void ChipSelect(SpiPacket &pkt, bool enable) {
+  MYL_NOINLINE void ChipSelect(SpiPacket &pkt, bool enable) {
     if (enable) {
       uint16_t new_op = config_.operation;
       if (pkt.polarity == SpiPolarity::High) {

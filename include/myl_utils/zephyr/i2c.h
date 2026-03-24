@@ -69,7 +69,7 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
    * (both use a RESTART between write and read phases). There is no true
    * simultaneous full-duplex on I2C.
    */
-  bool ReadWritePacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool ReadWritePacket(I2cPacket &pkt) {
     struct i2c_msg msgs[2];
     msgs[0].buf = pkt.tx_data->data;
     msgs[0].len = pkt.tx_data->length;
@@ -81,7 +81,7 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
     return StartTransfer(msgs, 2, pkt);
   }
 
-  bool WritePacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool WritePacket(I2cPacket &pkt) {
     struct i2c_msg msg;
     msg.buf = pkt.tx_data->data;
     msg.len = pkt.tx_data->length;
@@ -89,7 +89,7 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
     return StartTransfer(&msg, 1, pkt);
   }
 
-  bool ReadPacket(I2cPacket &pkt) {
+  MYL_NOINLINE bool ReadPacket(I2cPacket &pkt) {
     struct i2c_msg msg;
     msg.buf = pkt.rx_data->data;
     msg.len = pkt.rx_data->length;
@@ -97,7 +97,7 @@ class ZephyrI2cDevice : public I2c<ZephyrI2cDevice> {
     return StartTransfer(&msg, 1, pkt);
   }
 
-  void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
+  MYL_NOINLINE void ChipSelect(I2cPacket & /*pkt*/, bool /*enable*/) {
     // I2C does not use chip select - addressing is handled via the packet address
   }
 

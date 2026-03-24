@@ -13,11 +13,15 @@
  * extern SPI_HandleTypeDef hspi1;
  * Stm32SpiDevice spi(&hspi1);
  *
- * // Chip select pin (configured by CubeMX)
- * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
+ * // Chip select pin (configured by CubeMX, active-low by default)
+ * Stm32GpioOutput cs_gpio(CS_GPIO_Port, CS_Pin);
+ * ChipSelectPin cs(cs_gpio);  // active-low (default)
  *
  * // Wrap transport with per-device config (chip select, callback)
- * SpiDevice<Stm32SpiDevice> sensor(spi, cs_pin);
+ * SpiDevice<Stm32SpiDevice> sensor(spi, cs);
+ *
+ * // For an active-high CS device:
+ * // ChipSelectPin cs(cs_gpio, /*active_low=*/false);
  *
  * // Create and configure buffers
  * Buffer<16> tx;
@@ -35,8 +39,8 @@
  * extern SPI_HandleTypeDef hspi1;
  * Stm32AsyncSpiDevice<> spi(&hspi1);  // defaults to TransferMode::Interrupt
  *
- * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
- * SpiDevice<Stm32AsyncSpiDevice<>> sensor(spi, cs_pin, my_callback);
+ * Stm32GpioOutput cs_gpio(CS_GPIO_Port, CS_Pin);
+ * SpiDevice<Stm32AsyncSpiDevice<>> sensor(spi, ChipSelectPin(cs_gpio), my_callback);
  *
  * SpiPacketBundle<16> cmd;
  * cmd.tx.Set(0x80 | REG_ADDR);
@@ -55,8 +59,8 @@
  * // — or —
  * Stm32AsyncSpiDevice<TransferMode::Dma> spi(&hspi1);
  *
- * Stm32GpioOutput cs_pin(CS_GPIO_Port, CS_Pin);
- * SpiDevice<Stm32DmaSpiDevice<>> sensor(spi, cs_pin, my_callback);
+ * Stm32GpioOutput cs_gpio(CS_GPIO_Port, CS_Pin);
+ * SpiDevice<Stm32DmaSpiDevice<>> sensor(spi, ChipSelectPin(cs_gpio), my_callback);
  *
  * // Buffers must be in DMA-accessible RAM (not DTCM on F7/H7)
  * SpiPacketBundle<16> cmd;

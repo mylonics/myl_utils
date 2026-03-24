@@ -290,8 +290,12 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
     }
 
     derived().ChipSelect(*current_command_, false);
-    if (current_command_->callback && current_command_->rx_data) {
-      current_command_->callback(*current_command_->rx_data);
+    if (current_command_->callback) {
+      if (current_command_->rx_data) {
+        current_command_->callback(*current_command_->rx_data);
+      } else if (current_command_->tx_data) {
+        current_command_->callback(*current_command_->tx_data);
+      }
     }
 
     if (pkt_queue_.Readable()) {
@@ -428,7 +432,7 @@ using AsyncI2c = AsyncPacketSender<Derived, I2cPacket, QueueSize>;
  *
  * Usage:
  * @code
- * SpiDevice<ZephyrSpiDevice> sensor(spi, cs_pin);
+ * SpiDevice<ZephyrSpiDevice> sensor(spi, ChipSelectPin(cs_gpio));
  *
  * auto pkt = SpiPacket::RegRead(tx, rx);
  * sensor.ProcessCommand(pkt);
@@ -450,9 +454,10 @@ class SpiDevice {
                      SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
       : transport_(transport), callback_(cb), polarity_(pol), phase_(pha) {}
 
-  /// Construct with chip select (any GPIO type that has Set(bool))
-  template <typename Gpio>
-  SpiDevice(Transport &transport, Gpio &cs, void (*cb)(Data &) = nullptr,
+  /// Construct with chip select
+  /// @param cs ChipSelectPin wrapping any GPIO with Set(bool).
+  ///           Defaults to active-low — see ChipSelectPin for polarity control.
+  SpiDevice(Transport &transport, ChipSelectPin cs, void (*cb)(Data &) = nullptr,
             SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
       : transport_(transport), chip_select_(cs), callback_(cb), polarity_(pol), phase_(pha) {}
 
@@ -489,7 +494,7 @@ class SpiDevice {
  *
  * Usage:
  * @code
- * DualSpiDevice sensor(sync_spi, dma_spi, cs_pin, my_async_callback);
+ * DualSpiDevice sensor(sync_spi, dma_spi, ChipSelectPin(cs_gpio), my_async_callback);
  *
  * // Blocking single-register read during init
  * auto pkt = SpiPacket::RegRead(tx, rx);
@@ -529,9 +534,10 @@ class DualSpiDevice {
       : sync_transport_(sync), async_transport_(async),
         callback_(cb), polarity_(pol), phase_(pha) {}
 
-  /// Construct with chip select (any GPIO type that has Set(bool))
-  template <typename Gpio>
-  DualSpiDevice(SyncTransport &sync, AsyncTransport &async, Gpio &cs,
+  /// Construct with chip select
+  /// @param cs ChipSelectPin wrapping any GPIO with Set(bool).
+  ///           Defaults to active-low — see ChipSelectPin for polarity control.
+  DualSpiDevice(SyncTransport &sync, AsyncTransport &async, ChipSelectPin cs,
                 void (*cb)(Data &) = nullptr,
                 SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
       : sync_transport_(sync), async_transport_(async),

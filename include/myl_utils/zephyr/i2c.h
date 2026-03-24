@@ -23,7 +23,8 @@
  * rx.length = 8;
  *
  * // Execute transfer — address is applied automatically
- * eeprom.WriteThenRead(tx, rx);
+ * auto pkt = I2cPacket::RegRead(tx, rx);
+ * eeprom.ProcessCommand(pkt);
  * @endcode
  */
 

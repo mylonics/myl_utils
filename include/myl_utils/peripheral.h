@@ -11,7 +11,8 @@
  * 1. Create a transport (e.g., ZephyrSpiDevice, Stm32SpiDevice)
  * 2. Wrap it in an SpiDevice/I2cDevice with per-device config (addr, CS, callback)
  * 3. Create Buffer objects and use Set()/Append() to populate TX data
- * 4. Use convenience methods (Write, Read, WriteThenRead) or ProcessCommand()
+ * 4. Build packets with factory methods (SpiPacket::WriteOnly, RegRead, etc.)
+ * 5. Call ProcessCommand(pkt) to execute the transfer
  */
 
 #include "buffer.h"
@@ -57,6 +58,13 @@ struct Buffer : Data {
   static constexpr uint16_t capacity = Size;
   uint8_t storage[Size]{};
   Buffer() : Data(storage) {}
+
+  /// @note Copy/move deleted — the Data::data pointer targets this->storage;
+  ///       a shallow copy would leave data pointing at the source's storage.
+  Buffer(const Buffer &) = delete;
+  Buffer &operator=(const Buffer &) = delete;
+  Buffer(Buffer &&) = delete;
+  Buffer &operator=(Buffer &&) = delete;
 
   /// Reset buffer and write bytes, updating length automatically
   template <typename... Bytes>
@@ -174,6 +182,14 @@ struct SpiPacketBundle {
   Buffer<Size> tx;
   Buffer<Size> rx;
   SpiPacket pkt{&tx, &rx};
+
+  SpiPacketBundle() = default;
+
+  /// @note Copy/move deleted — pkt holds pointers to sibling tx/rx members.
+  SpiPacketBundle(const SpiPacketBundle &) = delete;
+  SpiPacketBundle &operator=(const SpiPacketBundle &) = delete;
+  SpiPacketBundle(SpiPacketBundle &&) = delete;
+  SpiPacketBundle &operator=(SpiPacketBundle &&) = delete;
 };
 
 /**
@@ -188,20 +204,15 @@ struct I2cPacketBundle {
   Buffer<Size> tx;
   Buffer<Size> rx;
   I2cPacket pkt{&tx, &rx};
+
+  I2cPacketBundle() = default;
+
+  /// @note Copy/move deleted — pkt holds pointers to sibling tx/rx members.
+  I2cPacketBundle(const I2cPacketBundle &) = delete;
+  I2cPacketBundle &operator=(const I2cPacketBundle &) = delete;
+  I2cPacketBundle(I2cPacketBundle &&) = delete;
+  I2cPacketBundle &operator=(I2cPacketBundle &&) = delete;
 };
-
-// Legacy macros — prefer SpiPacketBundle<Size> / I2cPacketBundle<Size> instead
-#define PACKET_HELPER(name, size) \
-  myl_utils::Buffer<size> name##_tx_;        \
-  myl_utils::Buffer<size> name##_rx_;
-
-#define I2C_PACKET_HELPER(name, size) \
-  PACKET_HELPER(name, size)           \
-  myl_utils::I2cPacket name{&name##_tx_, &name##_rx_};
-
-#define SPI_PACKET_HELPER(name, size) \
-  PACKET_HELPER(name, size)           \
-  myl_utils::SpiPacket name{&name##_tx_, &name##_rx_};
 
 /**
  * @brief CRTP base class for asynchronous packet-based transfers
@@ -231,7 +242,6 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
   volatile bool busy_{};
 
  public:
-  static constexpr bool is_sync = false;
   /**
    * @brief Queue a packet for transfer
    * @param pkt Packet to transfer
@@ -333,7 +343,6 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 template <class Derived, class DataPacket>
 class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
  public:
-  static constexpr bool is_sync = true;
   /**
    * @brief Execute a packet transfer (blocking)
    * @param pkt Packet to transfer
@@ -390,9 +399,16 @@ using AsyncI2c = AsyncPacketSender<Derived, I2cPacket, QueueSize>;
  * @brief SPI peripheral device wrapper
  *
  * Stores a reference to the SPI transport and per-device configuration
- * (chip select, callback). Automatically applies configuration to each
- * packet before sending, so device-specific settings are set once in the
- * constructor rather than repeated on every transfer.
+ * (chip select, callback, polarity, phase). Automatically stamps each
+ * packet with device-specific settings before forwarding to the transport.
+ *
+ * Usage:
+ * @code
+ * SpiDevice<ZephyrSpiDevice> sensor(spi, cs_pin);
+ *
+ * auto pkt = SpiPacket::RegRead(tx, rx);
+ * sensor.ProcessCommand(pkt);
+ * @endcode
  *
  * @tparam Transport SPI transport type (concrete class inheriting Spi<> or AsyncSpi<>)
  */
@@ -422,44 +438,13 @@ class SpiDevice {
     phase_ = pha;
   }
 
+  /// Stamp packet with device config and forward to transport
   [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {
     pkt.chip_select = chip_select_;
     pkt.polarity = polarity_;
     pkt.phase = phase_;
     if (!pkt.callback) pkt.callback = callback_;
     return transport_.ProcessCommand(pkt);
-  }
-
-  /// Write-only transfer (sync transports only)
-  [[nodiscard]] bool Write(Data &tx) {
-    static_assert(Transport::is_sync, "Write() uses a stack-local packet; use ProcessCommand() with async transports");
-    SpiPacket pkt{&tx};
-    pkt.type = PacketType::Write;
-    return ProcessCommand(pkt);
-  }
-
-  /// Read-only transfer (sync transports only)
-  [[nodiscard]] bool Read(Data &rx) {
-    static_assert(Transport::is_sync, "Read() uses a stack-local packet; use ProcessCommand() with async transports");
-    SpiPacket pkt{nullptr, &rx};
-    pkt.type = PacketType::Read;
-    return ProcessCommand(pkt);
-  }
-
-  /// Full-duplex simultaneous write and read (sync transports only)
-  [[nodiscard]] bool WriteAndRead(Data &tx, Data &rx) {
-    static_assert(Transport::is_sync, "WriteAndRead() uses a stack-local packet; use ProcessCommand() with async transports");
-    SpiPacket pkt{&tx, &rx};
-    pkt.type = PacketType::WriteAndRead;
-    return ProcessCommand(pkt);
-  }
-
-  /// Write first, then read (sync transports only)
-  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
-    static_assert(Transport::is_sync, "WriteThenRead() uses a stack-local packet; use ProcessCommand() with async transports");
-    SpiPacket pkt{&tx, &rx};
-    pkt.type = PacketType::WriteThenRead;
-    return ProcessCommand(pkt);
   }
 
   /// Access the underlying transport (e.g., to check last_status() / last_error())
@@ -474,22 +459,17 @@ class SpiDevice {
  * device interface. Both transports must share the same underlying SPI bus — it
  * is the caller's responsibility to ensure no overlapping transfers.
  *
- * Blocking convenience methods (Write, Read, WriteThenRead, WriteAndRead) use
- * the sync transport with stack-local packets. The async path
- * (ProcessCommand) uses the async transport with long-lived packets.
+ * ProcessCommand() routes through the async transport (DMA/IT).
+ * SyncProcessCommand() routes through the sync transport (blocking).
+ * Both stamp the packet with device config (CS, polarity, phase, callback).
  *
  * Usage:
  * @code
- * Stm32SpiDevice        sync_spi(&hspi1);
- * Stm32DmaSpiDevice<>   dma_spi(&hspi1);
- *
  * DualSpiDevice sensor(sync_spi, dma_spi, cs_pin, my_async_callback);
  *
  * // Blocking single-register read during init
- * Buffer<1> tx, rx;
- * tx.Set(0x80 | WHO_AM_I);
- * rx.length = 1;
- * sensor.WriteThenRead(tx, rx);
+ * auto pkt = SpiPacket::RegRead(tx, rx);
+ * sensor.SyncProcessCommand(pkt);
  *
  * // Non-blocking bulk DMA read during runtime
  * static SpiPacketBundle<256> bulk;
@@ -498,14 +478,11 @@ class SpiDevice {
  * sensor.ProcessCommand(bulk.pkt);
  * @endcode
  *
- * @tparam SyncTransport  Synchronous SPI transport (must satisfy is_sync == true)
- * @tparam AsyncTransport Asynchronous SPI transport (must satisfy is_sync == false)
+ * @tparam SyncTransport  Synchronous SPI transport
+ * @tparam AsyncTransport Asynchronous SPI transport
  */
 template <class SyncTransport, class AsyncTransport>
 class DualSpiDevice {
-  static_assert(SyncTransport::is_sync,   "SyncTransport must be a synchronous transport (is_sync == true)");
-  static_assert(!AsyncTransport::is_sync,  "AsyncTransport must be an asynchronous transport (is_sync == false)");
-
   SyncTransport &sync_transport_;
   AsyncTransport &async_transport_;
   ChipSelectPin chip_select_{};
@@ -542,44 +519,14 @@ class DualSpiDevice {
     phase_ = pha;
   }
 
-  // --- Async path (uses the async transport with long-lived packets) ---
-
   /// Queue an async transfer via the async transport (DMA/IT). Packet must outlive the transfer.
   [[nodiscard]] bool ProcessCommand(SpiPacket &pkt) {
     StampPacket(pkt);
     return async_transport_.ProcessCommand(pkt);
   }
 
-  // --- Sync path (uses the sync transport with stack-local packets) ---
-
-  /// Blocking write-only transfer
-  [[nodiscard]] bool Write(Data &tx) {
-    SpiPacket pkt{&tx};
-    pkt.type = PacketType::Write;
-    StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
-  }
-
-  /// Blocking read-only transfer
-  [[nodiscard]] bool Read(Data &rx) {
-    SpiPacket pkt{nullptr, &rx};
-    pkt.type = PacketType::Read;
-    StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
-  }
-
-  /// Blocking full-duplex simultaneous write and read
-  [[nodiscard]] bool WriteAndRead(Data &tx, Data &rx) {
-    SpiPacket pkt{&tx, &rx};
-    pkt.type = PacketType::WriteAndRead;
-    StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
-  }
-
-  /// Blocking write first, then read
-  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
-    SpiPacket pkt{&tx, &rx};
-    pkt.type = PacketType::WriteThenRead;
+  /// Execute a blocking transfer via the sync transport
+  [[nodiscard]] bool SyncProcessCommand(SpiPacket &pkt) {
     StampPacket(pkt);
     return sync_transport_.ProcessCommand(pkt);
   }
@@ -597,12 +544,16 @@ class DualSpiDevice {
  * @brief I2C peripheral device wrapper
  *
  * Stores a reference to the I2C transport and per-device configuration
- * (address, callback). Automatically applies configuration to each packet
- * before sending, so device-specific settings are set once in the constructor
- * rather than repeated on every transfer.
+ * (address, callback). Automatically stamps each packet with device-specific
+ * settings before forwarding to the transport.
  *
- * @note No WriteAndRead() convenience method — I2C is half-duplex.
- *       Use WriteThenRead() for register read patterns.
+ * Usage:
+ * @code
+ * I2cDevice<ZephyrI2cDevice> eeprom(i2c, 0x50);
+ *
+ * auto pkt = I2cPacket::RegRead(tx, rx);
+ * eeprom.ProcessCommand(pkt);
+ * @endcode
  *
  * @tparam Transport I2C transport type (concrete class inheriting I2c<> or AsyncI2c<>)
  */
@@ -616,34 +567,11 @@ class I2cDevice {
   I2cDevice(Transport &transport, uint8_t addr, void (*cb)(Data &) = nullptr)
       : transport_(transport), addr_(addr), callback_(cb) {}
 
+  /// Stamp packet with device config and forward to transport
   [[nodiscard]] bool ProcessCommand(I2cPacket &pkt) {
     pkt.addr = addr_;
     if (!pkt.callback) pkt.callback = callback_;
     return transport_.ProcessCommand(pkt);
-  }
-
-  /// Write-only transfer (sync transports only)
-  [[nodiscard]] bool Write(Data &tx) {
-    static_assert(Transport::is_sync, "Write() uses a stack-local packet; use ProcessCommand() with async transports");
-    I2cPacket pkt{&tx};
-    pkt.type = PacketType::Write;
-    return ProcessCommand(pkt);
-  }
-
-  /// Read-only transfer (sync transports only)
-  [[nodiscard]] bool Read(Data &rx) {
-    static_assert(Transport::is_sync, "Read() uses a stack-local packet; use ProcessCommand() with async transports");
-    I2cPacket pkt{nullptr, &rx};
-    pkt.type = PacketType::Read;
-    return ProcessCommand(pkt);
-  }
-
-  /// Write first, then read (sync transports only)
-  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
-    static_assert(Transport::is_sync, "WriteThenRead() uses a stack-local packet; use ProcessCommand() with async transports");
-    I2cPacket pkt{&tx, &rx};
-    pkt.type = PacketType::WriteThenRead;
-    return ProcessCommand(pkt);
   }
 
   /// Access the underlying transport (e.g., to check last_status() / last_error())
@@ -657,14 +585,14 @@ class I2cDevice {
  * Same concept as DualSpiDevice but for I2C. Combines a blocking transport
  * for simple register reads and an async transport for DMA/interrupt bulk transfers.
  *
- * @tparam SyncTransport  Synchronous I2C transport (must satisfy is_sync == true)
- * @tparam AsyncTransport Asynchronous I2C transport (must satisfy is_sync == false)
+ * ProcessCommand() routes through the async transport.
+ * SyncProcessCommand() routes through the sync transport (blocking).
+ *
+ * @tparam SyncTransport  Synchronous I2C transport
+ * @tparam AsyncTransport Asynchronous I2C transport
  */
 template <class SyncTransport, class AsyncTransport>
 class DualI2cDevice {
-  static_assert(SyncTransport::is_sync,   "SyncTransport must be a synchronous transport (is_sync == true)");
-  static_assert(!AsyncTransport::is_sync,  "AsyncTransport must be an asynchronous transport (is_sync == false)");
-
   SyncTransport &sync_transport_;
   AsyncTransport &async_transport_;
   uint8_t addr_{};
@@ -681,36 +609,14 @@ class DualI2cDevice {
       : sync_transport_(sync), async_transport_(async),
         addr_(addr), callback_(cb) {}
 
-  // --- Async path ---
-
   /// Queue an async transfer via the async transport. Packet must outlive the transfer.
   [[nodiscard]] bool ProcessCommand(I2cPacket &pkt) {
     StampPacket(pkt);
     return async_transport_.ProcessCommand(pkt);
   }
 
-  // --- Sync path ---
-
-  /// Blocking write-only transfer
-  [[nodiscard]] bool Write(Data &tx) {
-    I2cPacket pkt{&tx};
-    pkt.type = PacketType::Write;
-    StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
-  }
-
-  /// Blocking read-only transfer
-  [[nodiscard]] bool Read(Data &rx) {
-    I2cPacket pkt{nullptr, &rx};
-    pkt.type = PacketType::Read;
-    StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
-  }
-
-  /// Blocking write first, then read
-  [[nodiscard]] bool WriteThenRead(Data &tx, Data &rx) {
-    I2cPacket pkt{&tx, &rx};
-    pkt.type = PacketType::WriteThenRead;
+  /// Execute a blocking transfer via the sync transport
+  [[nodiscard]] bool SyncProcessCommand(I2cPacket &pkt) {
     StampPacket(pkt);
     return sync_transport_.ProcessCommand(pkt);
   }

@@ -29,7 +29,8 @@
  * rx.length = 4;
  *
  * // Execute transfer — chip select is applied automatically
- * sensor.WriteThenRead(tx, rx);
+ * auto pkt = SpiPacket::RegRead(tx, rx);
+ * sensor.ProcessCommand(pkt);
  * @endcode
  *
  * Usage (asynchronous):

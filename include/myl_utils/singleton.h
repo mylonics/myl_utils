@@ -1,9 +1,11 @@
 #pragma once
 
+#include "noncopyable.h"
+
 namespace myl_utils {
 
 template <typename T>
-class Singleton {
+class Singleton : NonCopyable<Singleton<T>> {
  public:
   static T& getInstance() {
     static T instance;
@@ -13,12 +15,6 @@ class Singleton {
  protected:
   Singleton() {}
   ~Singleton() {}
-
- public:
-  Singleton(Singleton const&) = delete;
-  Singleton& operator=(Singleton const&) = delete;
-  Singleton(Singleton&&) = delete;
-  Singleton& operator=(Singleton&&) = delete;
 };
 
 }  // namespace myl_utils

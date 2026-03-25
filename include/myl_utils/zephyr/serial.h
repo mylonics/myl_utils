@@ -12,6 +12,7 @@
  *
  */
 
+#include <myl_utils/noncopyable.h>
 #include <myl_utils/serial.h>
 #include <myl_utils/zephyr/usbd_init.h>
 #include <zephyr/drivers/uart.h>
@@ -31,13 +32,9 @@ namespace myl_utils {
 class ZephyrUsbSerialDevice;
 class ZephyrSerialDevice;
 
-class ZephyrBasicSerialDevice : public SerialPort {
+class ZephyrBasicSerialDevice : public SerialPort,
+                                NonCopyable<ZephyrBasicSerialDevice> {
  public:
-  ZephyrBasicSerialDevice(const ZephyrBasicSerialDevice &) = delete;
-  ZephyrBasicSerialDevice &operator=(const ZephyrBasicSerialDevice &) = delete;
-  ZephyrBasicSerialDevice(ZephyrBasicSerialDevice &&) = delete;
-  ZephyrBasicSerialDevice &operator=(ZephyrBasicSerialDevice &&) = delete;
-
   explicit ZephyrBasicSerialDevice(const struct device *dev, bool initialize = true) : dev_(dev) {
     if (initialize) {
       Initialize();
@@ -147,11 +144,6 @@ uart_config_data_bits ToZephyrDataBits(UartDataBits data_bits) { return (uart_co
 
 class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
  public:
-  ZephyrSerialDevice(const ZephyrSerialDevice &) = delete;
-  ZephyrSerialDevice &operator=(const ZephyrSerialDevice &) = delete;
-  ZephyrSerialDevice(ZephyrSerialDevice &&) = delete;
-  ZephyrSerialDevice &operator=(ZephyrSerialDevice &&) = delete;
-
   explicit ZephyrSerialDevice(const struct device *dev) : ZephyrBasicSerialDevice(dev), dev_(dev) {
     // uart_configure(dev_, &uart_cfg_);
 
@@ -231,11 +223,6 @@ class ZephyrSerialDevice : public ZephyrBasicSerialDevice {
 #ifdef CONFIG_MYL_UTILS_USB_SERIAL
 class ZephyrUsbSerialDevice : public ZephyrBasicSerialDevice {
  public:
-  ZephyrUsbSerialDevice(const ZephyrUsbSerialDevice &) = delete;
-  ZephyrUsbSerialDevice &operator=(const ZephyrUsbSerialDevice &) = delete;
-  ZephyrUsbSerialDevice(ZephyrUsbSerialDevice &&) = delete;
-  ZephyrUsbSerialDevice &operator=(ZephyrUsbSerialDevice &&) = delete;
-
   explicit ZephyrUsbSerialDevice(const struct device *dev)
       : ZephyrBasicSerialDevice(dev, false), dev_(dev) {
 

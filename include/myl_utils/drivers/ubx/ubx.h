@@ -1,6 +1,7 @@
 #pragma once
 
 #include <myl_utils/log.h>
+#include <myl_utils/noncopyable.h>
 #include <myl_utils/serial.h>
 
 #include "messages.h"
@@ -53,13 +54,8 @@ struct ubx_callbacks {
   ubx_rtcm_cb_t ubx_rtcm_cb{};
 };
 
-class UbxDevice {
+class UbxDevice : NonCopyable<UbxDevice> {
  public:
-  UbxDevice(const UbxDevice &) = delete;
-  UbxDevice &operator=(const UbxDevice &) = delete;
-  UbxDevice(UbxDevice &&) = delete;
-  UbxDevice &operator=(UbxDevice &&) = delete;
-
   UbxDevice(SerialPort& port, ubx_callbacks cbs) : port_(port), cbs_{cbs} {
     port_.ReconfigureUart(UartBaud::B_38400, UartParity::NONE, UartStopBits::ONE);
   }

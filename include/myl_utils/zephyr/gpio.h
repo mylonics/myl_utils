@@ -34,15 +34,12 @@ namespace myl_utils {
  *
  * Wraps a gpio_dt_spec and configures the pin as an output on construction.
  */
-class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput> {
+class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput>,
+                         NonCopyable<ZephyrGpioOutput> {
  protected:
   const struct gpio_dt_spec spec_;
 
  public:
-  ZephyrGpioOutput(const ZephyrGpioOutput &) = delete;
-  ZephyrGpioOutput &operator=(const ZephyrGpioOutput &) = delete;
-  ZephyrGpioOutput(ZephyrGpioOutput &&) = delete;
-  ZephyrGpioOutput &operator=(ZephyrGpioOutput &&) = delete;
 
   /**
    * @brief Construct and configure a GPIO output
@@ -68,15 +65,12 @@ class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput> {
  *
  * Wraps a gpio_dt_spec and configures the pin as an input on construction.
  */
-class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput> {
+class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput>,
+                        NonCopyable<ZephyrGpioInput> {
  protected:
   const struct gpio_dt_spec spec_;
 
  public:
-  ZephyrGpioInput(const ZephyrGpioInput &) = delete;
-  ZephyrGpioInput &operator=(const ZephyrGpioInput &) = delete;
-  ZephyrGpioInput(ZephyrGpioInput &&) = delete;
-  ZephyrGpioInput &operator=(ZephyrGpioInput &&) = delete;
 
   /**
    * @brief Construct and configure a GPIO input
@@ -98,15 +92,12 @@ class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput> {
  * Configured as output by default. Read() returns the current driven/sensed level.
  * Useful for open-drain pins or pins that need both read and write access.
  */
-class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin> {
+class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin>,
+                      NonCopyable<ZephyrGpioPin> {
  protected:
   const struct gpio_dt_spec spec_;
 
  public:
-  ZephyrGpioPin(const ZephyrGpioPin &) = delete;
-  ZephyrGpioPin &operator=(const ZephyrGpioPin &) = delete;
-  ZephyrGpioPin(ZephyrGpioPin &&) = delete;
-  ZephyrGpioPin &operator=(ZephyrGpioPin &&) = delete;
 
   /**
    * @brief Construct and configure a bidirectional GPIO pin
@@ -139,13 +130,8 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin> {
  * The user-supplied callback is stored and invoked from the Zephyr GPIO
  * ISR via a static trampoline.
  */
-class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt> {
- public:
-  ZephyrGpioInterrupt(const ZephyrGpioInterrupt &) = delete;
-  ZephyrGpioInterrupt &operator=(const ZephyrGpioInterrupt &) = delete;
-  ZephyrGpioInterrupt(ZephyrGpioInterrupt &&) = delete;
-  ZephyrGpioInterrupt &operator=(ZephyrGpioInterrupt &&) = delete;
-
+class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt>,
+                            NonCopyable<ZephyrGpioInterrupt> {
  protected:
   const struct gpio_dt_spec spec_;
   struct gpio_callback cb_data_{};

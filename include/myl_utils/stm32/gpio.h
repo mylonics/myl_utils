@@ -41,16 +41,13 @@ namespace myl_utils {
 /**
  * @brief STM32 HAL GPIO output pin
  */
-class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput> {
+class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput>,
+                        NonCopyable<Stm32GpioOutput> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
 
  public:
-  Stm32GpioOutput(const Stm32GpioOutput &) = delete;
-  Stm32GpioOutput &operator=(const Stm32GpioOutput &) = delete;
-  Stm32GpioOutput(Stm32GpioOutput &&) = delete;
-  Stm32GpioOutput &operator=(Stm32GpioOutput &&) = delete;
 
   /**
    * @brief Construct a GPIO output wrapper
@@ -73,16 +70,13 @@ class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput> {
 /**
  * @brief STM32 HAL GPIO input pin
  */
-class Stm32GpioInput : public GpioInputBase<Stm32GpioInput> {
+class Stm32GpioInput : public GpioInputBase<Stm32GpioInput>,
+                       NonCopyable<Stm32GpioInput> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
 
  public:
-  Stm32GpioInput(const Stm32GpioInput &) = delete;
-  Stm32GpioInput &operator=(const Stm32GpioInput &) = delete;
-  Stm32GpioInput(Stm32GpioInput &&) = delete;
-  Stm32GpioInput &operator=(Stm32GpioInput &&) = delete;
 
   /**
    * @brief Construct a GPIO input wrapper
@@ -104,16 +98,13 @@ class Stm32GpioInput : public GpioInputBase<Stm32GpioInput> {
  * Reads the current pin state via the input data register even when
  * configured as an output. Useful for open-drain pins.
  */
-class Stm32GpioPin : public GpioPinBase<Stm32GpioPin> {
+class Stm32GpioPin : public GpioPinBase<Stm32GpioPin>,
+                     NonCopyable<Stm32GpioPin> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
 
  public:
-  Stm32GpioPin(const Stm32GpioPin &) = delete;
-  Stm32GpioPin &operator=(const Stm32GpioPin &) = delete;
-  Stm32GpioPin(Stm32GpioPin &&) = delete;
-  Stm32GpioPin &operator=(Stm32GpioPin &&) = delete;
 
   /**
    * @brief Construct a bidirectional GPIO wrapper
@@ -152,13 +143,8 @@ class Stm32GpioPin : public GpioPinBase<Stm32GpioPin> {
  * }
  * @endcode
  */
-class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt> {
- public:
-  Stm32GpioInterrupt(const Stm32GpioInterrupt &) = delete;
-  Stm32GpioInterrupt &operator=(const Stm32GpioInterrupt &) = delete;
-  Stm32GpioInterrupt(Stm32GpioInterrupt &&) = delete;
-  Stm32GpioInterrupt &operator=(Stm32GpioInterrupt &&) = delete;
-
+class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt>,
+                           NonCopyable<Stm32GpioInterrupt> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;

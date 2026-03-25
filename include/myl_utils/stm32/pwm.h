@@ -25,6 +25,7 @@
  * @endcode
  */
 
+#include <myl_utils/noncopyable.h>
 #include <myl_utils/pwm.h>
 
 #ifndef HAL_TIM_MODULE_ENABLED
@@ -42,13 +43,8 @@ namespace myl_utils {
  * The timer prescaler and clock source must be configured by CubeMX.
  * This class manipulates ARR and CCR registers directly for period/duty changes.
  */
-class Stm32PwmOutput : public PwmOutputBase<Stm32PwmOutput> {
- public:
-  Stm32PwmOutput(const Stm32PwmOutput &) = delete;
-  Stm32PwmOutput &operator=(const Stm32PwmOutput &) = delete;
-  Stm32PwmOutput(Stm32PwmOutput &&) = delete;
-  Stm32PwmOutput &operator=(Stm32PwmOutput &&) = delete;
-
+class Stm32PwmOutput : public PwmOutputBase<Stm32PwmOutput>,
+                       NonCopyable<Stm32PwmOutput> {
  protected:
   TIM_HandleTypeDef *htim_;
   uint32_t channel_;

@@ -21,6 +21,7 @@
  * @endcode
  */
 
+#include <myl_utils/noncopyable.h>
 #include <myl_utils/pwm.h>
 #include <zephyr/drivers/pwm.h>
 
@@ -32,16 +33,13 @@ namespace myl_utils {
  * Wraps a pwm_dt_spec. The devicetree-defined period is used as the
  * default when SetDutyPercent() is called without an explicit period.
  */
-class ZephyrPwmOutput : public PwmOutputBase<ZephyrPwmOutput> {
+class ZephyrPwmOutput : public PwmOutputBase<ZephyrPwmOutput>,
+                        NonCopyable<ZephyrPwmOutput> {
  protected:
   const struct pwm_dt_spec spec_;
   uint32_t current_period_ns_;  ///< Cached period in nanoseconds
 
  public:
-  ZephyrPwmOutput(const ZephyrPwmOutput &) = delete;
-  ZephyrPwmOutput &operator=(const ZephyrPwmOutput &) = delete;
-  ZephyrPwmOutput(ZephyrPwmOutput &&) = delete;
-  ZephyrPwmOutput &operator=(ZephyrPwmOutput &&) = delete;
 
   /**
    * @brief Construct a Zephyr PWM output

@@ -30,6 +30,7 @@
  */
 
 #include "config.h"
+#include "noncopyable.h"
 #include <cstdint>
 #include <type_traits>
 

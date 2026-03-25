@@ -55,17 +55,10 @@ struct Data {
  * @tparam Size Size of the internal buffer in bytes
  */
 template <uint16_t Size>
-struct Buffer : Data {
+struct Buffer : Data, NonCopyable<Buffer<Size>> {
   static constexpr uint16_t capacity = Size;
   uint8_t storage[Size]{};
   Buffer() : Data(storage) {}
-
-  /// @note Copy/move deleted — the Data::data pointer targets this->storage;
-  ///       a shallow copy would leave data pointing at the source's storage.
-  Buffer(const Buffer &) = delete;
-  Buffer &operator=(const Buffer &) = delete;
-  Buffer(Buffer &&) = delete;
-  Buffer &operator=(Buffer &&) = delete;
 
   /// Reset buffer and write bytes, updating length automatically
   template <typename... Bytes>
@@ -203,18 +196,12 @@ static_assert(sizeof(I2cPacket) == 4 * sizeof(void *),
  * Usage: SpiPacketBundle<8> cmd; cmd.tx.Set(0x01, 0x02); device.SendSync(cmd.pkt);
  */
 template <uint16_t Size>
-struct SpiPacketBundle {
+struct SpiPacketBundle : NonCopyable<SpiPacketBundle<Size>> {
   Buffer<Size> tx;
   Buffer<Size> rx;
   SpiPacket pkt{&tx, &rx};
 
   SpiPacketBundle() = default;
-
-  /// @note Copy/move deleted — pkt holds pointers to sibling tx/rx members.
-  SpiPacketBundle(const SpiPacketBundle &) = delete;
-  SpiPacketBundle &operator=(const SpiPacketBundle &) = delete;
-  SpiPacketBundle(SpiPacketBundle &&) = delete;
-  SpiPacketBundle &operator=(SpiPacketBundle &&) = delete;
 };
 
 /**
@@ -225,18 +212,12 @@ struct SpiPacketBundle {
  * Usage: I2cPacketBundle<8> cmd; cmd.tx.Set(0x01, 0x02); device.SendSync(cmd.pkt);
  */
 template <uint16_t Size>
-struct I2cPacketBundle {
+struct I2cPacketBundle : NonCopyable<I2cPacketBundle<Size>> {
   Buffer<Size> tx;
   Buffer<Size> rx;
   I2cPacket pkt{&tx, &rx};
 
   I2cPacketBundle() = default;
-
-  /// @note Copy/move deleted — pkt holds pointers to sibling tx/rx members.
-  I2cPacketBundle(const I2cPacketBundle &) = delete;
-  I2cPacketBundle &operator=(const I2cPacketBundle &) = delete;
-  I2cPacketBundle(I2cPacketBundle &&) = delete;
-  I2cPacketBundle &operator=(I2cPacketBundle &&) = delete;
 };
 
 /**

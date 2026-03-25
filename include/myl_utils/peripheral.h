@@ -20,6 +20,7 @@
 #include "gpio.h"
 #include "myl_utils/noncopyable.h"
 #include <cstdint>
+#include <type_traits>
 
 namespace myl_utils {
 
@@ -267,6 +268,12 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 
  public:
   /**
+   * @brief Check whether an async transfer is currently in progress
+   * @return true if the async engine is busy (transfer in-flight or queued)
+   */
+  bool IsAsyncBusy() const { return busy_; }
+
+  /**
    * @brief Queue a packet for asynchronous transfer
    * @param pkt Packet to transfer (must outlive the async operation)
    * @return true if packet was accepted, false if queue is full
@@ -383,7 +390,18 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
  private:
   Derived &derived() { return static_cast<Derived &>(*this); }
 
+  /// SFINAE helper: detect if Derived has IsAsyncBusy()
+  template <typename D, typename = void>
+  struct HasAsyncBusy : std::false_type {};
+  template <typename D>
+  struct HasAsyncBusy<D, std::void_t<decltype(std::declval<D>().IsAsyncBusy())>> : std::true_type {};
+
   MYL_NOINLINE bool SyncSendPacket(DataPacket &pkt) {
+    // If the derived type also inherits AsyncPacketSender, refuse to start
+    // a blocking transfer while an async transfer is in-flight.
+    if constexpr (HasAsyncBusy<Derived>::value) {
+      if (derived().IsAsyncBusy()) return false;
+    }
     bool ok = true;
     derived().ChipSelect(pkt, true);
     switch (pkt.type) {

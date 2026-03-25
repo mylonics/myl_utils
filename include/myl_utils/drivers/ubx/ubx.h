@@ -55,6 +55,11 @@ struct ubx_callbacks {
 
 class UbxDevice {
  public:
+  UbxDevice(const UbxDevice &) = delete;
+  UbxDevice &operator=(const UbxDevice &) = delete;
+  UbxDevice(UbxDevice &&) = delete;
+  UbxDevice &operator=(UbxDevice &&) = delete;
+
   UbxDevice(SerialPort& port, ubx_callbacks cbs) : port_(port), cbs_{cbs} {
     port_.ReconfigureUart(UartBaud::B_38400, UartParity::NONE, UartStopBits::ONE);
   }

@@ -43,6 +43,12 @@ namespace myl_utils {
  * This class manipulates ARR and CCR registers directly for period/duty changes.
  */
 class Stm32PwmOutput : public PwmOutputBase<Stm32PwmOutput> {
+ public:
+  Stm32PwmOutput(const Stm32PwmOutput &) = delete;
+  Stm32PwmOutput &operator=(const Stm32PwmOutput &) = delete;
+  Stm32PwmOutput(Stm32PwmOutput &&) = delete;
+  Stm32PwmOutput &operator=(Stm32PwmOutput &&) = delete;
+
  protected:
   TIM_HandleTypeDef *htim_;
   uint32_t channel_;

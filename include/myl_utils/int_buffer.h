@@ -29,7 +29,7 @@ class InterruptTxBuffer : NonCopyable<InterruptTxBuffer<T, size>> {
     }
   }
 
-  bool Full() { return wloc_ + size; }
+  bool Full() { return ((wloc_ + 1) & mask_) == 0; }
 
   void Reset() { wloc_ = 0; }
 
@@ -85,7 +85,7 @@ class InterruptRxCircularBuffer {
 };
 
 template <class T, size_t size>
-class DmaRxCircularBuffer {
+class DmaRxCircularBuffer : NonCopyable<DmaRxCircularBuffer<T, size>> {
   static_assert((size & (size - 1)) == 0, "DmaRxCircularBuffer size must be a power of 2");
   static constexpr size_t mask_ = size - 1;
 

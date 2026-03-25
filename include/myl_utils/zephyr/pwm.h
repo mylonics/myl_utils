@@ -38,6 +38,11 @@ class ZephyrPwmOutput : public PwmOutputBase<ZephyrPwmOutput> {
   uint32_t current_period_ns_;  ///< Cached period in nanoseconds
 
  public:
+  ZephyrPwmOutput(const ZephyrPwmOutput &) = delete;
+  ZephyrPwmOutput &operator=(const ZephyrPwmOutput &) = delete;
+  ZephyrPwmOutput(ZephyrPwmOutput &&) = delete;
+  ZephyrPwmOutput &operator=(ZephyrPwmOutput &&) = delete;
+
   /**
    * @brief Construct a Zephyr PWM output
    * @param spec Devicetree PWM spec (from PWM_DT_SPEC_GET)

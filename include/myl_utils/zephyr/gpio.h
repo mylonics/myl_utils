@@ -39,6 +39,11 @@ class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput> {
   const struct gpio_dt_spec spec_;
 
  public:
+  ZephyrGpioOutput(const ZephyrGpioOutput &) = delete;
+  ZephyrGpioOutput &operator=(const ZephyrGpioOutput &) = delete;
+  ZephyrGpioOutput(ZephyrGpioOutput &&) = delete;
+  ZephyrGpioOutput &operator=(ZephyrGpioOutput &&) = delete;
+
   /**
    * @brief Construct and configure a GPIO output
    * @param spec Devicetree GPIO spec (from GPIO_DT_SPEC_GET)
@@ -68,6 +73,11 @@ class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput> {
   const struct gpio_dt_spec spec_;
 
  public:
+  ZephyrGpioInput(const ZephyrGpioInput &) = delete;
+  ZephyrGpioInput &operator=(const ZephyrGpioInput &) = delete;
+  ZephyrGpioInput(ZephyrGpioInput &&) = delete;
+  ZephyrGpioInput &operator=(ZephyrGpioInput &&) = delete;
+
   /**
    * @brief Construct and configure a GPIO input
    * @param spec Devicetree GPIO spec (from GPIO_DT_SPEC_GET)
@@ -93,6 +103,11 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin> {
   const struct gpio_dt_spec spec_;
 
  public:
+  ZephyrGpioPin(const ZephyrGpioPin &) = delete;
+  ZephyrGpioPin &operator=(const ZephyrGpioPin &) = delete;
+  ZephyrGpioPin(ZephyrGpioPin &&) = delete;
+  ZephyrGpioPin &operator=(ZephyrGpioPin &&) = delete;
+
   /**
    * @brief Construct and configure a bidirectional GPIO pin
    * @param spec Devicetree GPIO spec (from GPIO_DT_SPEC_GET)
@@ -125,6 +140,12 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin> {
  * ISR via a static trampoline.
  */
 class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt> {
+ public:
+  ZephyrGpioInterrupt(const ZephyrGpioInterrupt &) = delete;
+  ZephyrGpioInterrupt &operator=(const ZephyrGpioInterrupt &) = delete;
+  ZephyrGpioInterrupt(ZephyrGpioInterrupt &&) = delete;
+  ZephyrGpioInterrupt &operator=(ZephyrGpioInterrupt &&) = delete;
+
  protected:
   const struct gpio_dt_spec spec_;
   struct gpio_callback cb_data_{};

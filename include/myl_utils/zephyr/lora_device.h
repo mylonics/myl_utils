@@ -43,6 +43,11 @@ typedef void (*lora_msg_cb)(const struct network_header, const struct message_he
 
 class LoraDevice {
  public:
+  LoraDevice(const LoraDevice &) = delete;
+  LoraDevice &operator=(const LoraDevice &) = delete;
+  LoraDevice(LoraDevice &&) = delete;
+  LoraDevice &operator=(LoraDevice &&) = delete;
+
   enum class NETWORK_MSG_IDS : uint8_t { BROADCAST, REGISTER, REGISTER_REPLY, NODE_REQUEST, NODE_REPLY };
   LoraDevice(const struct device *const lora_dev, uint8_t net_id, lora_msg_cb msg_cb, bool isServer)
       : lora_dev_{lora_dev}, net_id_{net_id}, msg_cb_{msg_cb}, isServer_{isServer} {

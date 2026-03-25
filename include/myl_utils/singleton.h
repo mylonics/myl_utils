@@ -17,6 +17,8 @@ class Singleton {
  public:
   Singleton(Singleton const&) = delete;
   Singleton& operator=(Singleton const&) = delete;
+  Singleton(Singleton&&) = delete;
+  Singleton& operator=(Singleton&&) = delete;
 };
 
 }  // namespace myl_utils

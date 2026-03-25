@@ -2,55 +2,41 @@
 
 /**
  * @file spi.h
- * @brief Zephyr SPI device implementation
+ * @brief Zephyr SPI unified transport (sync + optionally async)
  *
- * Provides synchronous and asynchronous SPI device classes for Zephyr RTOS.
- * These implementations extend the Spi/AsyncSpi base classes to work with
- * the peripheral packet system.
+ * Provides SPI transport classes for Zephyr RTOS. ZephyrSpiTransport is
+ * sync-only (no queue overhead). When CONFIG_SPI_ASYNC is enabled,
+ * ZephyrAsyncSpiTransport provides both sync and async through a single
+ * object by inheriting from both SyncSpi and AsyncSpi CRTP bases.
  *
- * Usage (synchronous):
+ * Usage (sync-only):
  * @code
- * // Create transport instance
  * const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi0));
- * const struct spi_config spi_cfg = {
- *     .frequency = 1000000,
- *     .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8),
- * };
- * ZephyrSpiDevice spi(spi_dev, &spi_cfg);
+ * const struct spi_config spi_cfg = { .frequency = 1000000, .operation = SPI_OP_MODE_MASTER | SPI_WORD_SET(8) };
+ * ZephyrSpiTransport spi(spi_dev, &spi_cfg);
  *
- * // Wrap transport with per-device config (chip select, callback)
- * ZephyrGpioOutput cs_pin(cs_spec, false);  // CS initially deasserted
- * SpiDevice<ZephyrSpiDevice> sensor(spi, cs_pin);
+ * ZephyrGpioOutput cs_pin(cs_spec, false);
+ * SpiDevice<ZephyrSpiTransport> sensor(spi, ChipSelectPin(cs_pin));
  *
- * // Create and configure buffers
- * Buffer<16> tx;
- * Buffer<16> rx;
- * tx.Set(0x80 | REG_ADDR);  // Read register, length = 1
- * rx.length = 4;
- *
- * // Execute transfer — chip select is applied automatically
  * auto pkt = SpiPacket::RegRead(tx, rx);
- * sensor.ProcessCommand(pkt);
+ * sensor.SendSync(pkt);
  * @endcode
  *
- * Usage (asynchronous):
+ * Usage (async, requires CONFIG_SPI_ASYNC):
  * @code
  * const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi0));
  * const struct spi_config spi_cfg = { ... };
- * ZephyrAsyncSpiDevice<> spi(spi_dev, &spi_cfg);
+ * ZephyrAsyncSpiTransport<> spi(spi_dev, &spi_cfg);
  *
- * ZephyrGpioOutput cs_pin(cs_spec, false);
- * SpiDevice<ZephyrAsyncSpiDevice<>> sensor(spi, cs_pin, my_callback);
+ * SpiDevice<ZephyrAsyncSpiTransport<>> sensor(spi, ChipSelectPin(cs_pin), my_callback);
  *
- * // Buffers must outlive the async transfer (use class members or static)
- * SpiPacketBundle<16> cmd;
- * cmd.tx.Set(0x80 | REG_ADDR);
- * cmd.rx.length = 4;
- * cmd.pkt.type = PacketType::WriteThenRead;
- * sensor.ProcessCommand(cmd.pkt);
+ * // Sync during init
+ * sensor.SendSync(pkt);
  *
- * // Call PollComplete() periodically (e.g., from a Zephyr thread or timer)
- * // to check for transfer completion and advance the queue:
+ * // Async during runtime
+ * sensor.SendAsync(cmd.pkt);
+ *
+ * // Poll for completion periodically:
  * spi.PollComplete();
  * @endcode
  */
@@ -65,31 +51,25 @@
 namespace myl_utils {
 
 /**
- * @brief Synchronous Zephyr SPI device implementation
+ * @brief Synchronous-only Zephyr SPI transport
  *
- * This class provides synchronous (blocking) SPI communication using Zephyr's
- * SPI driver API. For asynchronous operation, create a separate class that
- * inherits from AsyncSpi<Derived, QueueSize> instead.
+ * Provides blocking SPI communication using Zephyr's spi_transceive(). For
+ * async+sync support, use ZephyrAsyncSpiTransport (requires CONFIG_SPI_ASYNC).
  */
-class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
-  friend class SyncPacketSender<ZephyrSpiDevice, SpiPacket>;
+class ZephyrSpiTransport : public SyncSpi<ZephyrSpiTransport> {
+  friend class SyncPacketSender<ZephyrSpiTransport, SpiPacket>;
 
  protected:
   const struct device *dev_;
   struct spi_config config_;
   int last_error_{};
 
-  /**
-   * @brief Execute an SPI transfer
-   * @param tx Pointer to TX buffer set (nullptr for read-only)
-   * @param rx Pointer to RX buffer set (nullptr for write-only)
-   */
   bool StartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
     last_error_ = spi_transceive(dev_, &config_, tx, rx);
     return last_error_ == 0;
   }
 
-  MYL_NOINLINE bool ReadWritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool SyncReadWritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
@@ -97,13 +77,13 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
     return StartTransfer(&tx_set, &rx_set);
   }
 
-  MYL_NOINLINE bool WritePacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool SyncWritePacket(SpiPacket &pkt) {
     spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
     spi_buf_set tx_set = {&tx_buf, 1};
     return StartTransfer(&tx_set, nullptr);
   }
 
-  MYL_NOINLINE bool ReadPacket(SpiPacket &pkt) {
+  MYL_NOINLINE bool SyncReadPacket(SpiPacket &pkt) {
     spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
     spi_buf_set rx_set = {&rx_buf, 1};
     return StartTransfer(nullptr, &rx_set);
@@ -130,12 +110,7 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
   }
 
  public:
-  /**
-   * @brief Construct a new Zephyr SPI Device
-   * @param spi_dev Pointer to the Zephyr SPI device (from DEVICE_DT_GET)
-   * @param spi_config Pointer to the SPI configuration structure (copied internally)
-   */
-  ZephyrSpiDevice(const struct device *spi_dev, const struct spi_config *spi_config)
+  ZephyrSpiTransport(const struct device *spi_dev, const struct spi_config *spi_config)
       : dev_(spi_dev), config_(*spi_config) {}
 
   /// Get the error code from the last transfer (0 = success)
@@ -150,21 +125,24 @@ class ZephyrSpiDevice : public Spi<ZephyrSpiDevice> {
 #include <zephyr/kernel.h>
 
 /**
- * @brief Asynchronous Zephyr SPI device implementation
+ * @brief Unified Zephyr SPI transport (sync + async)
  *
- * Uses Zephyr's spi_transceive_signal() for non-blocking SPI transfers. The
- * underlying driver uses DMA or interrupts depending on the SoC and devicetree
- * configuration — no user action is needed for DMA memory placement on Zephyr.
+ * Uses Zephyr's spi_transceive() for blocking (sync) and spi_transceive_signal()
+ * for non-blocking (async) transfers. Both paths are available through a single
+ * object.
  *
- * Completion is signalled via a k_poll_signal. Call PollComplete() periodically
- * (e.g., from a thread, work queue item, or timer callback) to check for
- * transfer completion, invoke the user callback, and advance the packet queue.
+ * For async: call PollComplete() periodically (from a thread, work queue, or timer)
+ * to check for completion, invoke the callback, and advance the packet queue.
+ * Alternatively, call WaitComplete() to block until the current transfer finishes.
  *
- * @tparam QueueSize Maximum number of packets that can be queued (default: 32)
+ * @tparam QueueSize Maximum number of async packets that can be queued (default: 32)
  */
 template <uint8_t QueueSize = 32>
-class ZephyrAsyncSpiDevice : public AsyncSpi<ZephyrAsyncSpiDevice<QueueSize>, QueueSize> {
-  friend class AsyncPacketSender<ZephyrAsyncSpiDevice<QueueSize>, SpiPacket, QueueSize>;
+class ZephyrAsyncSpiTransport
+    : public SyncSpi<ZephyrAsyncSpiTransport<QueueSize>>
+    , public AsyncSpi<ZephyrAsyncSpiTransport<QueueSize>, QueueSize> {
+  friend class SyncPacketSender<ZephyrAsyncSpiTransport<QueueSize>, SpiPacket>;
+  friend class AsyncPacketSender<ZephyrAsyncSpiTransport<QueueSize>, SpiPacket, QueueSize>;
 
  protected:
   const struct device *dev_;
@@ -173,47 +151,13 @@ class ZephyrAsyncSpiDevice : public AsyncSpi<ZephyrAsyncSpiDevice<QueueSize>, Qu
   struct k_poll_signal signal_;
   struct k_poll_event event_;
 
-  // Persistent buf/set storage for the in-flight transfer (must outlive the async call)
+  // Persistent buf/set storage for the in-flight async transfer (must outlive the async call)
   spi_buf active_tx_buf_{};
   spi_buf active_rx_buf_{};
   spi_buf_set active_tx_set_{};
   spi_buf_set active_rx_set_{};
 
-  bool StartAsyncTransfer(const spi_buf *tx, const spi_buf *rx) {
-    k_poll_signal_reset(&signal_);
-
-    if (tx) {
-      active_tx_buf_ = *tx;
-      active_tx_set_ = {&active_tx_buf_, 1};
-    }
-    if (rx) {
-      active_rx_buf_ = *rx;
-      active_rx_set_ = {&active_rx_buf_, 1};
-    }
-
-    last_error_ = spi_transceive_signal(
-        dev_, &config_,
-        tx ? &active_tx_set_ : nullptr,
-        rx ? &active_rx_set_ : nullptr,
-        &signal_);
-    return last_error_ == 0;
-  }
-
-  MYL_NOINLINE bool ReadWritePacket(SpiPacket &pkt) {
-    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
-    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
-    return StartAsyncTransfer(&tx_buf, &rx_buf);
-  }
-
-  MYL_NOINLINE bool WritePacket(SpiPacket &pkt) {
-    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
-    return StartAsyncTransfer(&tx_buf, nullptr);
-  }
-
-  MYL_NOINLINE bool ReadPacket(SpiPacket &pkt) {
-    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
-    return StartAsyncTransfer(nullptr, &rx_buf);
-  }
+  // ---- Shared chip select (same for sync and async paths) ----------------
 
   MYL_NOINLINE void ChipSelect(SpiPacket &pkt, bool enable) {
     if (enable) {
@@ -235,20 +179,80 @@ class ZephyrAsyncSpiDevice : public AsyncSpi<ZephyrAsyncSpiDevice<QueueSize>, Qu
     pkt.chip_select.Set(enable);
   }
 
+  // ---- Synchronous (blocking) implementations ---------------------------
+
+  bool SyncStartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
+    last_error_ = spi_transceive(dev_, &config_, tx, rx);
+    return last_error_ == 0;
+  }
+
+  MYL_NOINLINE bool SyncReadWritePacket(SpiPacket &pkt) {
+    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
+    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
+    spi_buf_set tx_set = {&tx_buf, 1};
+    spi_buf_set rx_set = {&rx_buf, 1};
+    return SyncStartTransfer(&tx_set, &rx_set);
+  }
+
+  MYL_NOINLINE bool SyncWritePacket(SpiPacket &pkt) {
+    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
+    spi_buf_set tx_set = {&tx_buf, 1};
+    return SyncStartTransfer(&tx_set, nullptr);
+  }
+
+  MYL_NOINLINE bool SyncReadPacket(SpiPacket &pkt) {
+    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
+    spi_buf_set rx_set = {&rx_buf, 1};
+    return SyncStartTransfer(nullptr, &rx_set);
+  }
+
+  // ---- Asynchronous implementations -------------------------------------
+
+  bool AsyncStartTransfer(const spi_buf *tx, const spi_buf *rx) {
+    k_poll_signal_reset(&signal_);
+
+    if (tx) {
+      active_tx_buf_ = *tx;
+      active_tx_set_ = {&active_tx_buf_, 1};
+    }
+    if (rx) {
+      active_rx_buf_ = *rx;
+      active_rx_set_ = {&active_rx_buf_, 1};
+    }
+
+    last_error_ = spi_transceive_signal(
+        dev_, &config_,
+        tx ? &active_tx_set_ : nullptr,
+        rx ? &active_rx_set_ : nullptr,
+        &signal_);
+    return last_error_ == 0;
+  }
+
+  MYL_NOINLINE bool AsyncReadWritePacket(SpiPacket &pkt) {
+    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
+    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
+    return AsyncStartTransfer(&tx_buf, &rx_buf);
+  }
+
+  MYL_NOINLINE bool AsyncWritePacket(SpiPacket &pkt) {
+    spi_buf tx_buf = {pkt.tx_data->data, pkt.tx_data->length};
+    return AsyncStartTransfer(&tx_buf, nullptr);
+  }
+
+  MYL_NOINLINE bool AsyncReadPacket(SpiPacket &pkt) {
+    spi_buf rx_buf = {pkt.rx_data->data, pkt.rx_data->length};
+    return AsyncStartTransfer(nullptr, &rx_buf);
+  }
+
  public:
-  /**
-   * @brief Construct a new Zephyr Async SPI Device
-   * @param spi_dev Pointer to the Zephyr SPI device (from DEVICE_DT_GET)
-   * @param spi_config Pointer to the SPI configuration structure (copied internally)
-   */
-  ZephyrAsyncSpiDevice(const struct device *spi_dev, const struct spi_config *spi_config)
+  ZephyrAsyncSpiTransport(const struct device *spi_dev, const struct spi_config *spi_config)
       : dev_(spi_dev), config_(*spi_config) {
     k_poll_signal_init(&signal_);
     k_poll_event_init(&event_, K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &signal_);
   }
 
   /**
-   * @brief Poll for transfer completion and advance the queue
+   * @brief Poll for async transfer completion and advance the queue
    *
    * Call this periodically from a thread, work queue, or timer. When the
    * current transfer completes, this invokes the user callback and starts
@@ -270,7 +274,7 @@ class ZephyrAsyncSpiDevice : public AsyncSpi<ZephyrAsyncSpiDevice<QueueSize>, Qu
   }
 
   /**
-   * @brief Block the calling thread until the current transfer completes
+   * @brief Block the calling thread until the current async transfer completes
    * @param timeout Maximum time to wait (K_FOREVER for indefinite)
    * @return 0 on success, negative errno on timeout or error
    */

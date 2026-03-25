@@ -14,7 +14,7 @@
 
 // ---------------------------------------------------------------------------
 // MYL_NOINLINE — prevent inlining of CRTP base-class dispatch methods
-//                (SendPacket, ProcessCommand, GPIO Set/Toggle, etc.)
+//                (SendSync, SendAsync, GPIO Set/Toggle, etc.)
 //                so debuggers always have real symbols to break on.
 // ---------------------------------------------------------------------------
 #ifdef MYL_DEBUG

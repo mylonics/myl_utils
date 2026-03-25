@@ -73,24 +73,20 @@ using GpioInterrupt = Stm32GpioInterrupt;
 
 // --- I2C -------------------------------------------------------------------
 #ifdef HAL_I2C_MODULE_ENABLED
-using I2cDev = Stm32I2cDevice;
-
 template <TransferMode Mode = TransferMode::Interrupt, uint8_t QueueSize = 32>
-using AsyncI2cDev = Stm32AsyncI2cDevice<Mode, QueueSize>;
+using I2cDev = Stm32I2cTransport<Mode, QueueSize>;
 
 template <uint8_t QueueSize = 32>
-using DmaI2cDev = Stm32DmaI2cDevice<QueueSize>;
+using DmaI2cDev = Stm32DmaI2cTransport<QueueSize>;
 #endif
 
 // --- SPI -------------------------------------------------------------------
 #ifdef HAL_SPI_MODULE_ENABLED
-using SpiDev = Stm32SpiDevice;
-
 template <TransferMode Mode = TransferMode::Interrupt, uint8_t QueueSize = 32>
-using AsyncSpiDev = Stm32AsyncSpiDevice<Mode, QueueSize>;
+using SpiDev = Stm32SpiTransport<Mode, QueueSize>;
 
 template <uint8_t QueueSize = 32>
-using DmaSpiDev = Stm32DmaSpiDevice<QueueSize>;
+using DmaSpiDev = Stm32DmaSpiTransport<QueueSize>;
 #endif
 
 // --- PWM & Timer -----------------------------------------------------------

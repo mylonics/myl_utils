@@ -8,11 +8,11 @@
  * SPI/I2C communication. All dispatch is resolved at compile time — no vtables.
  *
  * Usage:
- * 1. Create a transport (e.g., ZephyrSpiDevice, Stm32SpiDevice)
+ * 1. Create a transport (e.g., ZephyrSpiTransport, Stm32SpiTransport)
  * 2. Wrap it in an SpiDevice/I2cDevice with per-device config (addr, CS, callback)
  * 3. Create Buffer objects and use Set()/Append() to populate TX data
  * 4. Build packets with factory methods (SpiPacket::WriteOnly, RegRead, etc.)
- * 5. Call ProcessCommand(pkt) to execute the transfer
+ * 5. Call SendSync(pkt) for blocking or SendAsync(pkt) for non-blocking transfers
  */
 
 #include "buffer.h"
@@ -199,7 +199,7 @@ static_assert(sizeof(I2cPacket) == 4 * sizeof(void *),
  * @tparam Size Size of the TX and RX buffers in bytes
  *
  * Preferred over the PACKET_HELPER macros — provides proper scoping and type safety.
- * Usage: SpiPacketBundle<8> cmd; cmd.tx.Set(0x01, 0x02); device.ProcessCommand(cmd.pkt);
+ * Usage: SpiPacketBundle<8> cmd; cmd.tx.Set(0x01, 0x02); device.SendSync(cmd.pkt);
  */
 template <uint16_t Size>
 struct SpiPacketBundle {
@@ -221,7 +221,7 @@ struct SpiPacketBundle {
  * @tparam Size Size of the TX and RX buffers in bytes
  *
  * Preferred over the PACKET_HELPER macros — provides proper scoping and type safety.
- * Usage: I2cPacketBundle<8> cmd; cmd.tx.Set(0x01, 0x02); device.ProcessCommand(cmd.pkt);
+ * Usage: I2cPacketBundle<8> cmd; cmd.tx.Set(0x01, 0x02); device.SendSync(cmd.pkt);
  */
 template <uint16_t Size>
 struct I2cPacketBundle {
@@ -246,9 +246,9 @@ struct I2cPacketBundle {
  * next queued packet.
  *
  * Derived classes must implement (as non-virtual methods):
- *   bool ReadWritePacket(DataPacket &pkt)
- *   bool WritePacket(DataPacket &pkt)
- *   bool ReadPacket(DataPacket &pkt)
+ *   bool AsyncReadWritePacket(DataPacket &pkt)
+ *   bool AsyncWritePacket(DataPacket &pkt)
+ *   bool AsyncReadPacket(DataPacket &pkt)
  *   void ChipSelect(DataPacket &pkt, bool enable)
  *
  * @note ISR safety assumes ARM Cortex-M memory model (single-core, strongly-ordered
@@ -267,11 +267,11 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 
  public:
   /**
-   * @brief Queue a packet for transfer
-   * @param pkt Packet to transfer
+   * @brief Queue a packet for asynchronous transfer
+   * @param pkt Packet to transfer (must outlive the async operation)
    * @return true if packet was accepted, false if queue is full
    */
-  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(DataPacket &pkt) { return QueuePacket(pkt); }
+  [[nodiscard]] MYL_NOINLINE bool SendAsync(DataPacket &pkt) { return QueuePacket(pkt); }
 
   /**
    * @brief Call from interrupt handler when transfer completes
@@ -285,7 +285,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
   MYL_NOINLINE void TxRxCmpltCb() {
     if (current_command_->type == PacketType::WriteThenRead && write_and_read_pkt_) {
       write_and_read_pkt_ = false;
-      if (derived().ReadPacket(*current_command_)) return;
+      if (derived().AsyncReadPacket(*current_command_)) return;
       // Read failed to start — fall through to cleanup
     }
 
@@ -300,7 +300,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 
     if (pkt_queue_.Readable()) {
       DataPacket &temp_pkt_holder = *pkt_queue_.Get();
-      SendPacket(temp_pkt_holder);
+      AsyncSendPacket(temp_pkt_holder);
     } else {
       busy_ = false;
     }
@@ -319,11 +319,11 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
       pkt_queue_.Put(&pkt);
       return true;
     } else {
-      return SendPacket(pkt);
+      return AsyncSendPacket(pkt);
     }
   }
 
-  MYL_NOINLINE bool SendPacket(DataPacket &pkt) {
+  MYL_NOINLINE bool AsyncSendPacket(DataPacket &pkt) {
     busy_ = true;
     write_and_read_pkt_ = false;
     current_command_ = &pkt;
@@ -331,18 +331,18 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
     bool ok = false;
     switch (pkt.type) {
       case PacketType::Read:
-        ok = derived().ReadPacket(pkt);
+        ok = derived().AsyncReadPacket(pkt);
         break;
       case PacketType::WriteAndRead:
-        ok = derived().ReadWritePacket(pkt);
+        ok = derived().AsyncReadWritePacket(pkt);
         break;
       case PacketType::WriteThenRead:
         write_and_read_pkt_ = true;
-        ok = derived().WritePacket(pkt);
+        ok = derived().AsyncWritePacket(pkt);
         break;
       case PacketType::Write:
       default:
-        ok = derived().WritePacket(pkt);
+        ok = derived().AsyncWritePacket(pkt);
         break;
     }
     if (!ok) {
@@ -356,13 +356,13 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 /**
  * @brief CRTP base class for synchronous packet-based transfers
  *
- * Provides blocking transfer functionality. Each call to ProcessCommand()
+ * Provides blocking transfer functionality. Each call to SendSync()
  * completes the entire transfer before returning.
  *
  * Derived classes must implement (as non-virtual methods):
- *   bool ReadWritePacket(DataPacket &pkt)
- *   bool WritePacket(DataPacket &pkt)
- *   bool ReadPacket(DataPacket &pkt)
+ *   bool SyncReadWritePacket(DataPacket &pkt)
+ *   bool SyncWritePacket(DataPacket &pkt)
+ *   bool SyncReadPacket(DataPacket &pkt)
  *   void ChipSelect(DataPacket &pkt, bool enable)
  *
  * @tparam Derived The concrete implementation class (CRTP parameter)
@@ -376,30 +376,30 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
    * @param pkt Packet to transfer
    * @return true if the transfer succeeded, false on hardware error
    */
-  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(DataPacket &pkt) {
-    return SendPacket(pkt);
+  [[nodiscard]] MYL_NOINLINE bool SendSync(DataPacket &pkt) {
+    return SyncSendPacket(pkt);
   }
 
  private:
   Derived &derived() { return static_cast<Derived &>(*this); }
 
-  MYL_NOINLINE bool SendPacket(DataPacket &pkt) {
+  MYL_NOINLINE bool SyncSendPacket(DataPacket &pkt) {
     bool ok = true;
     derived().ChipSelect(pkt, true);
     switch (pkt.type) {
       case PacketType::Read:
-        ok = derived().ReadPacket(pkt);
+        ok = derived().SyncReadPacket(pkt);
         break;
       case PacketType::WriteAndRead:
-        ok = derived().ReadWritePacket(pkt);
+        ok = derived().SyncReadWritePacket(pkt);
         break;
       case PacketType::WriteThenRead:
-        ok = derived().WritePacket(pkt);
-        if (ok) ok = derived().ReadPacket(pkt);
+        ok = derived().SyncWritePacket(pkt);
+        if (ok) ok = derived().SyncReadPacket(pkt);
         break;
       case PacketType::Write:
       default:
-        ok = derived().WritePacket(pkt);
+        ok = derived().SyncWritePacket(pkt);
         break;
     }
     derived().ChipSelect(pkt, false);
@@ -407,19 +407,19 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
   }
 };
 
-/// Synchronous SPI device CRTP base — usage: class MySpi : public Spi<MySpi> { ... };
+/// Synchronous SPI CRTP base — usage: class MySpi : public SyncSpi<MySpi> { ... };
 template <typename Derived>
-using Spi = SyncPacketSender<Derived, SpiPacket>;
+using SyncSpi = SyncPacketSender<Derived, SpiPacket>;
 
-/// Synchronous I2C device CRTP base — usage: class MyI2c : public I2c<MyI2c> { ... };
+/// Synchronous I2C CRTP base — usage: class MyI2c : public SyncI2c<MyI2c> { ... };
 template <typename Derived>
-using I2c = SyncPacketSender<Derived, I2cPacket>;
+using SyncI2c = SyncPacketSender<Derived, I2cPacket>;
 
-/// Asynchronous SPI device CRTP base — usage: class MySpi : public AsyncSpi<MySpi> { ... };
+/// Asynchronous SPI CRTP base — usage: class MySpi : public AsyncSpi<MySpi> { ... };
 template <typename Derived, uint8_t QueueSize = 32>
 using AsyncSpi = AsyncPacketSender<Derived, SpiPacket, QueueSize>;
 
-/// Asynchronous I2C device CRTP base — usage: class MyI2c : public AsyncI2c<MyI2c> { ... };
+/// Asynchronous I2C CRTP base — usage: class MyI2c : public AsyncI2c<MyI2c> { ... };
 template <typename Derived, uint8_t QueueSize = 32>
 using AsyncI2c = AsyncPacketSender<Derived, I2cPacket, QueueSize>;
 
@@ -430,15 +430,24 @@ using AsyncI2c = AsyncPacketSender<Derived, I2cPacket, QueueSize>;
  * (chip select, callback, polarity, phase). Automatically stamps each
  * packet with device-specific settings before forwarding to the transport.
  *
+ * Exposes SendSync() and/or SendAsync() depending on what the transport
+ * supports. A transport inheriting SyncSpi provides SendSync(); a transport
+ * inheriting AsyncSpi provides SendAsync(); a transport inheriting both
+ * provides both methods through a single device object.
+ *
  * Usage:
  * @code
- * SpiDevice<ZephyrSpiDevice> sensor(spi, ChipSelectPin(cs_gpio));
+ * // Sync-only transport:
+ * SpiDevice<ZephyrSpiTransport> sensor(spi, ChipSelectPin(cs_gpio));
+ * sensor.SendSync(pkt);
  *
- * auto pkt = SpiPacket::RegRead(tx, rx);
- * sensor.ProcessCommand(pkt);
+ * // Unified transport (sync + async):
+ * SpiDevice<Stm32SpiTransport<>> sensor(spi, ChipSelectPin(cs_gpio), my_callback);
+ * sensor.SendSync(pkt);       // blocking register read during init
+ * sensor.SendAsync(bulk.pkt); // non-blocking DMA read at runtime
  * @endcode
  *
- * @tparam Transport SPI transport type (concrete class inheriting Spi<> or AsyncSpi<>)
+ * @tparam Transport SPI transport type (class inheriting SyncSpi<>, AsyncSpi<>, or both)
  */
 template <class Transport>
 class SpiDevice {
@@ -447,6 +456,13 @@ class SpiDevice {
   void (*callback_)(Data &){};
   SpiPolarity polarity_{SpiPolarity::Low};
   SpiPhase phase_{SpiPhase::Leading};
+
+  MYL_NOINLINE void StampPacket(SpiPacket &pkt) {
+    pkt.chip_select = chip_select_;
+    pkt.polarity = polarity_;
+    pkt.phase = phase_;
+    if (!pkt.callback) pkt.callback = callback_;
+  }
 
  public:
   /// Construct without chip select
@@ -467,107 +483,21 @@ class SpiDevice {
     phase_ = pha;
   }
 
-  /// Stamp packet with device config and forward to transport
-  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(SpiPacket &pkt) {
-    pkt.chip_select = chip_select_;
-    pkt.polarity = polarity_;
-    pkt.phase = phase_;
-    if (!pkt.callback) pkt.callback = callback_;
-    return transport_.ProcessCommand(pkt);
+  /// Execute a blocking transfer (requires transport with SyncSpi base)
+  [[nodiscard]] MYL_NOINLINE bool SendSync(SpiPacket &pkt) {
+    StampPacket(pkt);
+    return transport_.SendSync(pkt);
   }
 
-  /// Access the underlying transport (e.g., to check last_status() / last_error())
+  /// Queue an async transfer (requires transport with AsyncSpi base). Packet must outlive the transfer.
+  [[nodiscard]] MYL_NOINLINE bool SendAsync(SpiPacket &pkt) {
+    StampPacket(pkt);
+    return transport_.SendAsync(pkt);
+  }
+
+  /// Access the underlying transport (e.g., to check last_status() / last_error(), call TxRxCmpltCb())
   Transport &transport() { return transport_; }
   const Transport &transport() const { return transport_; }
-};
-
-/**
- * @brief Dual-mode SPI device wrapper (sync + async from one object)
- *
- * Combines a synchronous transport and an asynchronous transport behind a single
- * device interface. Both transports must share the same underlying SPI bus — it
- * is the caller's responsibility to ensure no overlapping transfers.
- *
- * ProcessCommand() routes through the async transport (DMA/IT).
- * SyncProcessCommand() routes through the sync transport (blocking).
- * Both stamp the packet with device config (CS, polarity, phase, callback).
- *
- * Usage:
- * @code
- * DualSpiDevice sensor(sync_spi, dma_spi, ChipSelectPin(cs_gpio), my_async_callback);
- *
- * // Blocking single-register read during init
- * auto pkt = SpiPacket::RegRead(tx, rx);
- * sensor.SyncProcessCommand(pkt);
- *
- * // Non-blocking bulk DMA read during runtime
- * static SpiPacketBundle<256> bulk;
- * bulk.pkt.type = PacketType::Read;
- * bulk.rx.length = 256;
- * sensor.ProcessCommand(bulk.pkt);
- * @endcode
- *
- * @tparam SyncTransport  Synchronous SPI transport
- * @tparam AsyncTransport Asynchronous SPI transport
- */
-template <class SyncTransport, class AsyncTransport>
-class DualSpiDevice {
-  SyncTransport &sync_transport_;
-  AsyncTransport &async_transport_;
-  ChipSelectPin chip_select_{};
-  void (*callback_)(Data &){};
-  SpiPolarity polarity_{SpiPolarity::Low};
-  SpiPhase phase_{SpiPhase::Leading};
-
-  MYL_NOINLINE void StampPacket(SpiPacket &pkt) {
-    pkt.chip_select = chip_select_;
-    pkt.polarity = polarity_;
-    pkt.phase = phase_;
-    if (!pkt.callback) pkt.callback = callback_;
-  }
-
- public:
-  /// Construct without chip select
-  DualSpiDevice(SyncTransport &sync, AsyncTransport &async,
-                void (*cb)(Data &) = nullptr,
-                SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
-      : sync_transport_(sync), async_transport_(async),
-        callback_(cb), polarity_(pol), phase_(pha) {}
-
-  /// Construct with chip select
-  /// @param cs ChipSelectPin wrapping any GPIO with Set(bool).
-  ///           Defaults to active-low — see ChipSelectPin for polarity control.
-  DualSpiDevice(SyncTransport &sync, AsyncTransport &async, ChipSelectPin cs,
-                void (*cb)(Data &) = nullptr,
-                SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
-      : sync_transport_(sync), async_transport_(async),
-        chip_select_(cs), callback_(cb), polarity_(pol), phase_(pha) {}
-
-  /// Set SPI clock polarity and phase
-  void SetSpiMode(SpiPolarity pol, SpiPhase pha) {
-    polarity_ = pol;
-    phase_ = pha;
-  }
-
-  /// Queue an async transfer via the async transport (DMA/IT). Packet must outlive the transfer.
-  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(SpiPacket &pkt) {
-    StampPacket(pkt);
-    return async_transport_.ProcessCommand(pkt);
-  }
-
-  /// Execute a blocking transfer via the sync transport
-  [[nodiscard]] MYL_NOINLINE bool SyncProcessCommand(SpiPacket &pkt) {
-    StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
-  }
-
-  /// Access the sync transport (e.g., to check last_status())
-  SyncTransport &sync_transport() { return sync_transport_; }
-  const SyncTransport &sync_transport() const { return sync_transport_; }
-
-  /// Access the async transport (e.g., to call TxRxCmpltCb(), check last_status())
-  AsyncTransport &async_transport() { return async_transport_; }
-  const AsyncTransport &async_transport() const { return async_transport_; }
 };
 
 /**
@@ -577,54 +507,28 @@ class DualSpiDevice {
  * (address, callback). Automatically stamps each packet with device-specific
  * settings before forwarding to the transport.
  *
+ * Exposes SendSync() and/or SendAsync() depending on what the transport
+ * supports. A transport inheriting SyncI2c provides SendSync(); a transport
+ * inheriting AsyncI2c provides SendAsync(); a transport inheriting both
+ * provides both methods through a single device object.
+ *
  * Usage:
  * @code
- * I2cDevice<ZephyrI2cDevice> eeprom(i2c, 0x50);
+ * // Sync-only:
+ * I2cDevice<ZephyrI2cTransport> eeprom(i2c, 0x50);
+ * eeprom.SendSync(pkt);
  *
- * auto pkt = I2cPacket::RegRead(tx, rx);
- * eeprom.ProcessCommand(pkt);
+ * // Unified transport:
+ * I2cDevice<Stm32I2cTransport<>> sensor(i2c, 0x68, my_callback);
+ * sensor.SendSync(pkt);        // blocking register read
+ * sensor.SendAsync(bulk.pkt);  // non-blocking DMA transfer
  * @endcode
  *
- * @tparam Transport I2C transport type (concrete class inheriting I2c<> or AsyncI2c<>)
+ * @tparam Transport I2C transport type (class inheriting SyncI2c<>, AsyncI2c<>, or both)
  */
 template <class Transport>
 class I2cDevice {
   Transport &transport_;
-  uint8_t addr_{};
-  void (*callback_)(Data &){};
-
- public:
-  I2cDevice(Transport &transport, uint8_t addr, void (*cb)(Data &) = nullptr)
-      : transport_(transport), addr_(addr), callback_(cb) {}
-
-  /// Stamp packet with device config and forward to transport
-  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(I2cPacket &pkt) {
-    pkt.addr = addr_;
-    if (!pkt.callback) pkt.callback = callback_;
-    return transport_.ProcessCommand(pkt);
-  }
-
-  /// Access the underlying transport (e.g., to check last_status() / last_error())
-  Transport &transport() { return transport_; }
-  const Transport &transport() const { return transport_; }
-};
-
-/**
- * @brief Dual-mode I2C device wrapper (sync + async from one object)
- *
- * Same concept as DualSpiDevice but for I2C. Combines a blocking transport
- * for simple register reads and an async transport for DMA/interrupt bulk transfers.
- *
- * ProcessCommand() routes through the async transport.
- * SyncProcessCommand() routes through the sync transport (blocking).
- *
- * @tparam SyncTransport  Synchronous I2C transport
- * @tparam AsyncTransport Asynchronous I2C transport
- */
-template <class SyncTransport, class AsyncTransport>
-class DualI2cDevice {
-  SyncTransport &sync_transport_;
-  AsyncTransport &async_transport_;
   uint8_t addr_{};
   void (*callback_)(Data &){};
 
@@ -634,30 +538,24 @@ class DualI2cDevice {
   }
 
  public:
-  DualI2cDevice(SyncTransport &sync, AsyncTransport &async,
-                uint8_t addr, void (*cb)(Data &) = nullptr)
-      : sync_transport_(sync), async_transport_(async),
-        addr_(addr), callback_(cb) {}
+  I2cDevice(Transport &transport, uint8_t addr, void (*cb)(Data &) = nullptr)
+      : transport_(transport), addr_(addr), callback_(cb) {}
 
-  /// Queue an async transfer via the async transport. Packet must outlive the transfer.
-  [[nodiscard]] MYL_NOINLINE bool ProcessCommand(I2cPacket &pkt) {
+  /// Execute a blocking transfer (requires transport with SyncI2c base)
+  [[nodiscard]] MYL_NOINLINE bool SendSync(I2cPacket &pkt) {
     StampPacket(pkt);
-    return async_transport_.ProcessCommand(pkt);
+    return transport_.SendSync(pkt);
   }
 
-  /// Execute a blocking transfer via the sync transport
-  [[nodiscard]] MYL_NOINLINE bool SyncProcessCommand(I2cPacket &pkt) {
+  /// Queue an async transfer (requires transport with AsyncI2c base). Packet must outlive the transfer.
+  [[nodiscard]] MYL_NOINLINE bool SendAsync(I2cPacket &pkt) {
     StampPacket(pkt);
-    return sync_transport_.ProcessCommand(pkt);
+    return transport_.SendAsync(pkt);
   }
 
-  /// Access the sync transport (e.g., to check last_status())
-  SyncTransport &sync_transport() { return sync_transport_; }
-  const SyncTransport &sync_transport() const { return sync_transport_; }
-
-  /// Access the async transport (e.g., to call TxRxCmpltCb(), check last_status())
-  AsyncTransport &async_transport() { return async_transport_; }
-  const AsyncTransport &async_transport() const { return async_transport_; }
+  /// Access the underlying transport (e.g., to check last_status() / last_error(), call TxRxCmpltCb())
+  Transport &transport() { return transport_; }
+  const Transport &transport() const { return transport_; }
 };
 
 }  // namespace myl_utils

@@ -107,16 +107,16 @@ using PwmOutput = ZephyrPwmOutput;
 
 // --- I2C -------------------------------------------------------------------
 #ifdef CONFIG_I2C
-using I2cDev = ZephyrI2cDevice;
+using I2cDev = ZephyrI2cTransport;
 #endif
 
 // --- SPI -------------------------------------------------------------------
 #ifdef CONFIG_SPI
-using SpiDev = ZephyrSpiDevice;
+using SpiDev = ZephyrSpiTransport;
 
 #ifdef CONFIG_SPI_ASYNC
 template <uint8_t QueueSize = 32>
-using AsyncSpiDev = ZephyrAsyncSpiDevice<QueueSize>;
+using AsyncSpiDev = ZephyrAsyncSpiTransport<QueueSize>;
 #endif
 #endif // CONFIG_SPI
 

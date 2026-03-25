@@ -62,6 +62,7 @@ class ZephyrSpiTransport : public SyncSpi<ZephyrSpiTransport> {
  protected:
   const struct device *dev_;
   struct spi_config config_;
+  const uint32_t default_freq_;
   int last_error_{};
 
   bool StartTransfer(const spi_buf_set *tx, const spi_buf_set *rx) {
@@ -105,13 +106,20 @@ class ZephyrSpiTransport : public SyncSpi<ZephyrSpiTransport> {
       if (new_op != config_.operation) {
         config_.operation = new_op;
       }
+
+      // Frequency override (only slow down, never exceed default)
+      uint32_t target_freq = default_freq_;
+      if (pkt.max_freq_hz > 0 && pkt.max_freq_hz < default_freq_) {
+        target_freq = pkt.max_freq_hz;
+      }
+      config_.frequency = target_freq;
     }
     pkt.chip_select.Set(enable);
   }
 
  public:
   ZephyrSpiTransport(const struct device *spi_dev, const struct spi_config *spi_config)
-      : dev_(spi_dev), config_(*spi_config) {}
+      : dev_(spi_dev), config_(*spi_config), default_freq_(spi_config->frequency) {}
 
   /// Get the error code from the last transfer (0 = success)
   int last_error() const { return last_error_; }
@@ -147,6 +155,7 @@ class ZephyrAsyncSpiTransport
  protected:
   const struct device *dev_;
   struct spi_config config_;
+  const uint32_t default_freq_;
   int last_error_{};
   struct k_poll_signal signal_;
   struct k_poll_event event_;
@@ -175,6 +184,13 @@ class ZephyrAsyncSpiTransport
       if (new_op != config_.operation) {
         config_.operation = new_op;
       }
+
+      // Frequency override (only slow down, never exceed default)
+      uint32_t target_freq = default_freq_;
+      if (pkt.max_freq_hz > 0 && pkt.max_freq_hz < default_freq_) {
+        target_freq = pkt.max_freq_hz;
+      }
+      config_.frequency = target_freq;
     }
     pkt.chip_select.Set(enable);
   }
@@ -246,7 +262,7 @@ class ZephyrAsyncSpiTransport
 
  public:
   ZephyrAsyncSpiTransport(const struct device *spi_dev, const struct spi_config *spi_config)
-      : dev_(spi_dev), config_(*spi_config) {
+      : dev_(spi_dev), config_(*spi_config), default_freq_(spi_config->frequency) {
     k_poll_signal_init(&signal_);
     k_poll_event_init(&event_, K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &signal_);
   }

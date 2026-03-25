@@ -125,7 +125,7 @@ enum class TransferMode : uint8_t {
  *
  * Buffers are optional — set only tx_data for write-only, only rx_data for read-only,
  * or both for bidirectional transfers. Per-device fields (chip_select, callback,
- * polarity, phase) are typically set automatically by the SpiDevice wrapper.
+ * polarity, phase, max_freq_hz) are typically set automatically by the SpiDevice wrapper.
  */
 struct SpiPacket {
   // --- Pointer-aligned fields first (no internal padding holes) -------
@@ -133,6 +133,8 @@ struct SpiPacket {
   Data *rx_data{};               ///< RX buffer (nullptr if unused)
   ChipSelectPin chip_select{};   ///< Optional chip select GPIO (type-erased, no virtual)
   void (*callback)(Data &){};    ///< Optional completion callback
+  // --- 32-bit fields --------------------------------------------------
+  uint32_t max_freq_hz{0};                  ///< 0 = use transport default; non-zero = cap SCLK for this transfer
   // --- Byte-sized fields grouped together at the end ------------------
   PacketType type{PacketType::Write};
   SpiPolarity polarity{SpiPolarity::Low};   ///< Clock polarity (set by SpiDevice wrapper)
@@ -153,7 +155,8 @@ struct SpiPacket {
   }
 };
 
-static_assert(sizeof(SpiPacket) == 6 * sizeof(void *),
+// max_freq_hz fits in tail padding on 64-bit (6 pointers) but adds a word on 32-bit (7 pointers)
+static_assert(sizeof(SpiPacket) == (sizeof(void *) >= 8 ? 6 : 7) * sizeof(void *),
               "SpiPacket has unexpected padding — check for stray #pragma pack");
 
 /**
@@ -455,32 +458,41 @@ class SpiDevice {
   void (*callback_)(Data &){};
   SpiPolarity polarity_{SpiPolarity::Low};
   SpiPhase phase_{SpiPhase::Leading};
+  uint32_t max_freq_hz_{0};
 
   MYL_NOINLINE void StampPacket(SpiPacket &pkt) {
     pkt.chip_select = chip_select_;
     pkt.polarity = polarity_;
     pkt.phase = phase_;
+    if (pkt.max_freq_hz == 0) pkt.max_freq_hz = max_freq_hz_;
     if (!pkt.callback) pkt.callback = callback_;
   }
 
  public:
   /// Construct without chip select
   explicit SpiDevice(Transport &transport, void (*cb)(Data &) = nullptr,
-                     SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
-      : transport_(transport), callback_(cb), polarity_(pol), phase_(pha) {}
+                     SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading,
+                     uint32_t max_freq_hz = 0)
+      : transport_(transport), callback_(cb), polarity_(pol), phase_(pha),
+        max_freq_hz_(max_freq_hz) {}
 
   /// Construct with chip select
   /// @param cs ChipSelectPin wrapping any GPIO with Set(bool).
   ///           Defaults to active-low — see ChipSelectPin for polarity control.
   SpiDevice(Transport &transport, ChipSelectPin cs, void (*cb)(Data &) = nullptr,
-            SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading)
-      : transport_(transport), chip_select_(cs), callback_(cb), polarity_(pol), phase_(pha) {}
+            SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading,
+            uint32_t max_freq_hz = 0)
+      : transport_(transport), chip_select_(cs), callback_(cb), polarity_(pol), phase_(pha),
+        max_freq_hz_(max_freq_hz) {}
 
   /// Set SPI clock polarity and phase
   void SetSpiMode(SpiPolarity pol, SpiPhase pha) {
     polarity_ = pol;
     phase_ = pha;
   }
+
+  /// Set the maximum SCLK frequency for all transfers on this device (0 = no limit)
+  void SetMaxFrequency(uint32_t hz) { max_freq_hz_ = hz; }
 
   /// Execute a blocking transfer (requires transport with SyncSpi base)
   [[nodiscard]] MYL_NOINLINE bool SendSync(SpiPacket &pkt) {

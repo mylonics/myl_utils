@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstring>
 #include <type_traits>
 #include <utility>
 
@@ -186,6 +187,30 @@ class BufferProducer {
     return mask_ - ((w - r) & mask_);
   }
 
+  /// Write up to count items from data in a single atomic transaction
+  /// (one acquire-load and one release-store, regardless of count).
+  /// Returns the number of items written; may be less than count if the
+  /// buffer lacks space. Never overwrites — use Put() for single-item
+  /// overwrite-on-full behaviour.
+  size_t TryPutN(const T* data, size_t count) noexcept {
+    const size_t w    = wloc_->load_relaxed();
+    const size_t r    = rloc_->load_acquire();
+    const size_t free = mask_ - ((w - r) & mask_);
+    if (count > free) count = free;
+    if (count == 0) return 0;
+    const size_t cap  = mask_ + 1;  // N
+    const size_t seg1 = cap - w;    // elements from w to end of array
+    if (count <= seg1) {
+      for (size_t i = 0; i < count; ++i) buf_[w + i] = data[i];
+    } else {
+      for (size_t i = 0; i < seg1; ++i) buf_[w + i] = data[i];
+      const size_t seg2 = count - seg1;
+      for (size_t i = 0; i < seg2; ++i) buf_[i] = data[seg1 + i];
+    }
+    wloc_->store_release((w + count) & mask_);
+    return count;
+  }
+
  private:
   T*                   buf_;
   detail::AtomicIndex* wloc_;
@@ -238,6 +263,29 @@ class BufferConsumer {
     const size_t w = wloc_->load_acquire();
     const size_t r = rloc_->load_relaxed();
     return (w - r) & mask_;
+  }
+
+  /// Read and remove up to count items into out in a single atomic transaction
+  /// (one acquire-load and one release-store, regardless of count).
+  /// Returns the number of items read; may be less than count if fewer
+  /// items are currently available.
+  size_t GetN(T* out, size_t count) noexcept {
+    const size_t w     = wloc_->load_acquire();
+    const size_t r     = rloc_->load_relaxed();
+    const size_t avail = (w - r) & mask_;
+    if (count > avail) count = avail;
+    if (count == 0) return 0;
+    const size_t cap  = mask_ + 1;  // N
+    const size_t seg1 = cap - r;    // elements from r to end of array
+    if (count <= seg1) {
+      for (size_t i = 0; i < count; ++i) out[i] = buf_[r + i];
+    } else {
+      for (size_t i = 0; i < seg1; ++i) out[i] = buf_[r + i];
+      const size_t seg2 = count - seg1;
+      for (size_t i = 0; i < seg2; ++i) out[seg1 + i] = buf_[i];
+    }
+    rloc_->store_release((r + count) & mask_);
+    return count;
   }
 
  private:
@@ -323,6 +371,186 @@ class CircularBuffer : NonCopyable<CircularBuffer<T, N>> {
   // producer (writes wloc_) and consumer (writes rloc_) on SMP targets.
   alignas(kCacheLineSize) detail::AtomicIndex wloc_;
   alignas(kCacheLineSize) detail::AtomicIndex rloc_;
+};
+
+// ---------------------------------------------------------------------------
+
+/**
+ * @brief Single-context power-of-2 ring buffer — no atomics, no ISR sharing.
+ *
+ * All operations must be called from the same execution context (same thread,
+ * same RTOS task, same cooperative scheduler slot). Do NOT share an instance
+ * between an ISR and a task, or between two tasks without external
+ * synchronisation — use CircularBuffer with BufferProducer/BufferConsumer
+ * for cross-context producer/consumer patterns.
+ *
+ * Because there is no concurrent access, no atomic operations or memory
+ * barriers are emitted and no cache-line padding is needed. This makes
+ * LocalBuffer suited for targets without atomic support (AVR, bare RISC-V
+ * without the A extension, soft-core FPGAs) and for cooperative schedulers
+ * where the code-size and RAM overhead of AtomicIndex is unwanted.
+ *
+ * Overflow behaviour of Put():
+ *   When the buffer is full, Put() silently drops the oldest item before
+ *   writing the new one. Use TryPut() / TryPutN() to detect and reject
+ *   writes when full.
+ *
+ * Zero-copy read:
+ *   ReadableSpan() returns a pointer and length for the first contiguous
+ *   readable region. Call Consume(n) to advance the read index without
+ *   copying. If the readable data wraps the ring, a second call to
+ *   ReadableSpan() after consuming the first segment returns the remainder.
+ */
+template <typename T, size_t N>
+class LocalBuffer : NonCopyable<LocalBuffer<T, N>> {
+  static_assert((N & (N - 1)) == 0, "LocalBuffer size must be a power of 2");
+  static_assert(N >= 2,             "LocalBuffer size must be at least 2");
+  static_assert(std::is_trivially_copyable<T>::value,
+                "LocalBuffer<T>: T must be trivially copyable (enables memcpy bulk paths "
+                "and ensures safe use in same-context embedded code)");
+  static constexpr size_t kMask = N - 1;
+
+ public:
+  /// Pointer + length describing one contiguous region inside the ring.
+  struct Span {
+    const T* ptr;
+    size_t   len;
+  };
+
+  // -------------------------------------------------------------------------
+  // Single-item interface
+  // -------------------------------------------------------------------------
+
+  /// Write item; overwrites oldest entry if full.
+  void Put(const T& item) noexcept {
+    const size_t next = (w_ + 1) & kMask;
+    if (next == r_) r_ = (next + 1) & kMask;  // full: drop oldest
+    buf_[w_] = item;
+    w_ = next;
+  }
+
+  /// Write item (move); overwrites oldest entry if full.
+  void Put(T&& item) noexcept {
+    const size_t next = (w_ + 1) & kMask;
+    if (next == r_) r_ = (next + 1) & kMask;
+    buf_[w_] = std::move(item);
+    w_ = next;
+  }
+
+  /// Write item only if space is available. Returns true on success.
+  [[nodiscard]] bool TryPut(const T& item) noexcept {
+    const size_t next = (w_ + 1) & kMask;
+    if (next == r_) return false;
+    buf_[w_] = item;
+    w_ = next;
+    return true;
+  }
+
+  /// Write item (move) only if space is available. Returns true on success.
+  [[nodiscard]] bool TryPut(T&& item) noexcept {
+    const size_t next = (w_ + 1) & kMask;
+    if (next == r_) return false;
+    buf_[w_] = std::move(item);
+    w_ = next;
+    return true;
+  }
+
+  /// Read and remove the oldest item. Behaviour is undefined if empty.
+  T Get() noexcept {
+#ifdef MYL_DEBUG
+    assert(Readable());
+#endif
+    T item = buf_[r_];
+    r_ = (r_ + 1) & kMask;
+    return item;
+  }
+
+  /// Read and remove the oldest item into out. Returns false if empty.
+  [[nodiscard]] bool TryGet(T& out) noexcept {
+    if (w_ == r_) return false;
+    out = buf_[r_];
+    r_ = (r_ + 1) & kMask;
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk transfer interface
+  // -------------------------------------------------------------------------
+
+  /// Write up to count items from data. Returns items actually written (0 if
+  /// full). Never overwrites — use Put() in a loop for that.
+  size_t TryPutN(const T* data, size_t count) noexcept {
+    const size_t free = kMask - ((w_ - r_) & kMask);
+    if (count > free) count = free;
+    if (count == 0) return 0;
+    const size_t seg1 = N - w_;  // elements from w_ to end of array
+    if (count <= seg1) {
+      std::memcpy(buf_ + w_, data, count * sizeof(T));
+    } else {
+      std::memcpy(buf_ + w_, data,          seg1 * sizeof(T));
+      std::memcpy(buf_,      data + seg1, (count - seg1) * sizeof(T));
+    }
+    w_ = (w_ + count) & kMask;
+    return count;
+  }
+
+  /// Read and remove up to count items into out. Returns items actually read.
+  size_t GetN(T* out, size_t count) noexcept {
+    const size_t avail = (w_ - r_) & kMask;
+    if (count > avail) count = avail;
+    if (count == 0) return 0;
+    const size_t seg1 = N - r_;  // elements from r_ to end of array
+    if (count <= seg1) {
+      std::memcpy(out, buf_ + r_, count * sizeof(T));
+    } else {
+      std::memcpy(out,        buf_ + r_, seg1 * sizeof(T));
+      std::memcpy(out + seg1, buf_,      (count - seg1) * sizeof(T));
+    }
+    r_ = (r_ + count) & kMask;
+    return count;
+  }
+
+  // -------------------------------------------------------------------------
+  // Zero-copy read interface
+  // -------------------------------------------------------------------------
+
+  /// Return the first contiguous readable region without consuming it.
+  /// If all buffered data is contiguous, len == Size(). If the data wraps,
+  /// len covers only the pre-wrap segment; call again after Consume(len)
+  /// to obtain the second (post-wrap) segment.
+  /// Returns {nullptr, 0} if empty.
+  Span ReadableSpan() const noexcept {
+    const size_t avail = (w_ - r_) & kMask;
+    if (avail == 0) return {nullptr, 0};
+    const size_t seg1 = N - r_;
+    return {buf_ + r_, avail < seg1 ? avail : seg1};
+  }
+
+  /// Advance the read index by n without copying any data.
+  /// PRECONDITION: n <= Size(). Violating this corrupts the buffer state.
+  void Consume(size_t n) noexcept {
+#ifdef MYL_DEBUG
+    assert(n <= ((w_ - r_) & kMask));
+#endif
+    r_ = (r_ + n) & kMask;
+  }
+
+  // -------------------------------------------------------------------------
+  // State queries
+  // -------------------------------------------------------------------------
+
+  bool   Readable()  const noexcept { return w_ != r_; }
+  bool   Writable()  const noexcept { return ((w_ + 1) & kMask) != r_; }
+  size_t Size()      const noexcept { return (w_ - r_) & kMask; }
+  size_t FreeSpace() const noexcept { return kMask - ((w_ - r_) & kMask); }
+  static constexpr size_t Capacity() noexcept { return N - 1; }
+
+  void Reset() noexcept { w_ = 0; r_ = 0; }
+
+ private:
+  T      buf_[N]{};
+  size_t w_{0};
+  size_t r_{0};
 };
 
 }  // namespace myl_utils

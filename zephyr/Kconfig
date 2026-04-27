@@ -56,6 +56,28 @@ config MYL_UTILS_I2C
 	help
 	  This option enables the use of the mylonics i2c libraries.
 
+config MYL_UTILS_UART_ASYNC
+	bool "Enable Mylonics Async UART Utilities"
+	default n
+	depends on MYL_UTILS_SERIAL
+	select UART_ASYNC_API
+	help
+	  This option enables ZephyrAsyncUartTransport which uses Zephyr's
+	  UART Async API (uart_callback_set / uart_rx_enable / uart_tx) for
+	  DMA-backed non-blocking UART transfers.
+	  Note: UART_ASYNC_API and UART_INTERRUPT_DRIVEN are mutually exclusive
+	  on most drivers — use one or the other per UART instance.
+
+config MYL_UTILS_CAN
+	bool "Enable Mylonics CAN Utilities"
+	default n
+	depends on MYL_UTILS
+	select CAN
+	help
+	  This option enables the use of the mylonics CAN libraries
+	  (ZephyrCanTransport). Provides a CRTP-based CanBase<Derived>
+	  interface with send, receive filters, and optional polled RX queue.
+
 config MYL_UTILS_LORA
 	bool "Enable Mylonics Lora Utilities"
 	default n

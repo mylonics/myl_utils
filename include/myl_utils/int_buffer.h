@@ -60,24 +60,29 @@ template <class T, size_t size>
 class InterruptRxCircularBuffer {
  public:
   explicit InterruptRxCircularBuffer(void (*enable_rx_interrupt)(T *))
-      : enable_rx_interrupt_(enable_rx_interrupt) {}
+      : producer_(buffer_), consumer_(buffer_), enable_rx_interrupt_(enable_rx_interrupt) {}
 
   MYL_ISR_NOINLINE void Start() { Prime(); }
 
-  MYL_ISR_NOINLINE T Get() { return buffer.Get(); }
+  // Call from task/consumer context only.
+  MYL_ISR_NOINLINE T Get() { return consumer_.Get(); }
 
-  MYL_ISR_NOINLINE void Reset() { buffer.Reset(); }
+  MYL_ISR_NOINLINE void Reset() { buffer_.Reset(); }
 
-  MYL_ISR_NOINLINE bool Readable() { return buffer.Readable(); }
+  // Call from task/consumer context only.
+  MYL_ISR_NOINLINE bool Readable() { return consumer_.Readable(); }
 
+  // Call from ISR/producer context only.
   MYL_ISR_NOINLINE void Put() {
-    buffer.Put(incoming_byte_);
+    producer_.Put(incoming_byte_);
     Prime();
   }
 
  private:
   T incoming_byte_{};
-  CircularBuffer<T, size> buffer;
+  CircularBuffer<T, size> buffer_;
+  CircularBufferProducer<T, size> producer_;
+  CircularBufferConsumer<T, size> consumer_;
 
   void Prime() { enable_rx_interrupt_(&incoming_byte_); }
 

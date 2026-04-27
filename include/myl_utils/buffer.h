@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -109,16 +108,6 @@ class AtomicIndex {
   mutable size_t v_;  // mutable: required so const load methods can pass &v_ to __atomic_load_n
 };
 
-#endif
-
-// Cache-line size for false-sharing prevention between producer/consumer indices.
-// Uses std::hardware_destructive_interference_size when available (C++17),
-// otherwise defaults to 64 bytes, which is safe for Cortex-A, x86, and RISC-V.
-// inline constexpr avoids ODR violations when included from multiple TUs.
-#if defined(__cpp_lib_hardware_interference_size)
-  inline constexpr size_t kCacheLineSize = std::hardware_destructive_interference_size;
-#else
-  inline constexpr size_t kCacheLineSize = 64u;
 #endif
 
 }  // namespace detail
@@ -332,8 +321,8 @@ class CircularBuffer : NonCopyable<CircularBuffer<T, N>> {
   T buf_[N]{};
   // Placed on separate cache lines to prevent false sharing between the
   // producer (writes wloc_) and consumer (writes rloc_) on SMP targets.
-  alignas(detail::kCacheLineSize) detail::AtomicIndex wloc_;
-  alignas(detail::kCacheLineSize) detail::AtomicIndex rloc_;
+  alignas(kCacheLineSize) detail::AtomicIndex wloc_;
+  alignas(kCacheLineSize) detail::AtomicIndex rloc_;
 };
 
 }  // namespace myl_utils

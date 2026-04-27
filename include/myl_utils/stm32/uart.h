@@ -15,14 +15,14 @@
  * Transfer modes (selected at compile time via template parameter):
  *   TransferMode::Polling   — HAL_UART_Transmit/Receive (blocking, no ISR)
  *   TransferMode::Interrupt — HAL_UART_Transmit_IT/Receive_IT (ISR-driven)
- *   TransferMode::Dma       — HAL_UART_Transmit_DMA + HAL_UART_Receive_IT (DMA TX, IT RX)
+ *   TransferMode::Dma       — HAL_UART_Transmit_DMA + HAL_UARTEx_ReceiveToIdle_DMA (DMA TX, DMA RX with idle detection)
  *
  * ISR integration (Interrupt and Dma modes):
  *   Call uart.TxCmpltCb() from HAL_UART_TxCpltCallback()
- *   Call uart.RxCmpltCb() from HAL_UART_RxCpltCallback()
+ *   Call uart.RxEventCb(Size) from HAL_UARTEx_RxEventCallback()
  *
  * @note RxBufSize and TxBufSize must be powers of 2 (CircularBuffer requirement).
- * @note DMA TX buffers must be in DMA-accessible RAM on STM32 F7/H7 (not DTCM/ITCM).
+ * @note DMA TX and RX staging buffers must be in DMA-accessible RAM on STM32 F7/H7 (not DTCM/ITCM).
  *
  * Usage (interrupt mode):
  * @code
@@ -38,7 +38,7 @@
  * }
  *
  * void HAL_UART_TxCpltCallback(UART_HandleTypeDef *h) { if (h == &huart1) uart.TxCmpltCb(); }
- * void HAL_UART_RxCpltCallback(UART_HandleTypeDef *h) { if (h == &huart1) uart.RxCmpltCb(); }
+ * void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *h, uint16_t Size) { if (h == &huart1) uart.RxEventCb(Size); }
  * @endcode
  *
  * Usage (polling mode, no ISR callbacks needed):
@@ -73,7 +73,7 @@ namespace myl_utils {
  * Inherits UartBase<Self> and implements all Impl* methods using STM32 HAL.
  *
  * @tparam Mode        Transfer mode: Polling, Interrupt (default), or Dma
- * @tparam RxBufSize   RX ring buffer size in bytes (power of 2, used in Interrupt/Dma mode)
+ * @tparam RxBufSize   RX ring buffer and ReceiveToIdle staging buffer size in bytes (power of 2, used in Interrupt/Dma mode)
  * @tparam TxBufSize   TX ring buffer + staging buffer size in bytes (power of 2, used in Interrupt/Dma mode)
  */
 template <TransferMode Mode = TransferMode::Interrupt,
@@ -111,13 +111,16 @@ class Stm32UartTransport
   }
 
   /**
-   * @brief Call from HAL_UART_RxCpltCallback() to store the received byte and re-arm RX.
+   * @brief Call from HAL_UARTEx_RxEventCallback() with the number of bytes received.
+   * Copies the staged bytes into the RX ring buffer and re-arms the receiver.
    * No-op in polling mode.
    */
-  MYL_ISR_NOINLINE void RxCmpltCb() {
+  MYL_ISR_NOINLINE void RxEventCb(uint16_t size) {
     if constexpr (Mode != TransferMode::Polling) {
-      rx_producer_.Put(rx_byte_);
-      HAL_UART_Receive_IT(huart_, &rx_byte_, 1);
+      for (uint16_t i = 0; i < size; ++i) {
+        rx_producer_.TryPut(rx_staging_[i]);
+      }
+      RearmRx();
     }
   }
 
@@ -128,8 +131,7 @@ class Stm32UartTransport
 
   MYL_NOINLINE bool ImplStart() {
     if constexpr (Mode != TransferMode::Polling) {
-      // Prime single-byte interrupt-driven RX
-      last_status_ = HAL_UART_Receive_IT(huart_, &rx_byte_, 1);
+      RearmRx();
       return last_status_ == HAL_OK;
     }
     return true;
@@ -137,8 +139,8 @@ class Stm32UartTransport
 
   MYL_NOINLINE void ImplReconfigureUart(UartBaud baud, UartParity parity, UartStopBits stop_bits) {
     if constexpr (Mode != TransferMode::Polling) {
-      // Disable interrupts during reconfiguration
-      HAL_UART_AbortReceive_IT(huart_);
+      // Abort active receive before reconfiguration
+      HAL_UART_AbortReceive(huart_);
     }
 
     huart_->Init.BaudRate = static_cast<uint32_t>(UartBaudEnumToValue(baud));
@@ -152,7 +154,7 @@ class Stm32UartTransport
     HAL_UART_Init(huart_);
 
     if constexpr (Mode != TransferMode::Polling) {
-      HAL_UART_Receive_IT(huart_, &rx_byte_, 1);
+      RearmRx();
     }
   }
 
@@ -235,6 +237,19 @@ class Stm32UartTransport
   }
 
  private:
+  // ---- RX re-arm (Interrupt / Dma modes) --------------------------------
+
+  MYL_ISR_NOINLINE void RearmRx() {
+    if constexpr (Mode == TransferMode::Dma) {
+      last_status_ = HAL_UARTEx_ReceiveToIdle_DMA(huart_, rx_staging_, static_cast<uint16_t>(RxBufSize));
+      if (huart_->hdmarx) {
+        __HAL_DMA_DISABLE_IT(huart_->hdmarx, DMA_IT_HT);
+      }
+    } else {
+      last_status_ = HAL_UARTEx_ReceiveToIdle_IT(huart_, rx_staging_, static_cast<uint16_t>(RxBufSize));
+    }
+  }
+
   // ---- TX staging (Interrupt / Dma modes) ------------------------------
 
   MYL_ISR_NOINLINE void StartTx() {
@@ -262,8 +277,8 @@ class Stm32UartTransport
   uint32_t timeout_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
-  // Interrupt / DMA mode RX (single-byte polling via IT)
-  uint8_t rx_byte_{};
+  // Interrupt / DMA mode RX (ReceiveToIdle staging buffer + ring buffer)
+  uint8_t rx_staging_[RxBufSize]{};
   CircularBuffer<uint8_t, RxBufSize> rx_buf_;
   BufferProducer<uint8_t> rx_producer_;
   BufferConsumer<uint8_t> rx_consumer_;

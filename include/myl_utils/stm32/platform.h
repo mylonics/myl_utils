@@ -53,6 +53,13 @@
 #include <myl_utils/stm32/timer.h>
 #endif
 
+// ---------------------------------------------------------------------------
+// UART / LPUART
+// ---------------------------------------------------------------------------
+#ifdef HAL_UART_MODULE_ENABLED
+#include <myl_utils/stm32/uart.h>
+#endif
+
 // ===========================================================================
 // Unprefixed aliases
 // ===========================================================================
@@ -93,6 +100,18 @@ using DmaSpiDev = Stm32DmaSpiTransport<QueueSize>;
 #ifdef HAL_TIM_MODULE_ENABLED
 using PwmOutput = Stm32PwmOutput;
 using HwTimer   = Stm32HwTimer;
+#endif
+
+// --- UART / LPUART ---------------------------------------------------------
+#ifdef HAL_UART_MODULE_ENABLED
+template <TransferMode Mode = TransferMode::Interrupt,
+          size_t RxBufSize = 256, size_t TxBufSize = 256>
+using UartDev = Stm32UartTransport<Mode, RxBufSize, TxBufSize>;
+
+template <size_t RxBufSize = 256, size_t TxBufSize = 256>
+using DmaUartDev = Stm32DmaUartTransport<RxBufSize, TxBufSize>;
+
+using PollingUartDev = Stm32PollingUartTransport;
 #endif
 
 } // namespace myl_utils

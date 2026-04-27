@@ -116,6 +116,7 @@ enum class SpiPhase : uint8_t {
  * Buffer objects are allocated in a suitable RAM section.
  */
 enum class TransferMode : uint8_t {
+  Polling,    ///< Use blocking/polling HAL functions (no ISR)
   Interrupt,  ///< Use interrupt-based HAL functions (_IT)
   Dma         ///< Use DMA-based HAL functions (_DMA)
 };

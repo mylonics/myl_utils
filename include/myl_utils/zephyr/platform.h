@@ -122,8 +122,12 @@ using AsyncSpiDev = ZephyrAsyncSpiTransport<QueueSize>;
 
 // --- Serial ----------------------------------------------------------------
 #ifdef CONFIG_MYL_UTILS_SERIAL
-using BasicSerialDev = ZephyrBasicSerialDevice;
-using SerialDev      = ZephyrSerialDevice;
+using UartDev = ZephyrUartTransport;
+
+#ifdef CONFIG_MYL_UTILS_UART_ASYNC
+template <size_t RxBufSize = 256, size_t ConsumerBufSize = 1024>
+using AsyncUartDev = ZephyrAsyncUartTransport<RxBufSize, ConsumerBufSize>;
+#endif
 
 #ifdef CONFIG_MYL_UTILS_USB_SERIAL
 using UsbSerialDev = ZephyrUsbSerialDevice;

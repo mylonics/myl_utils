@@ -94,7 +94,9 @@ class Stm32UartTransport
    * @param timeout_ms Timeout in milliseconds for polling-mode transfers (ignored in IT/DMA modes)
    */
   explicit Stm32UartTransport(UART_HandleTypeDef *huart, uint32_t timeout_ms = 100)
-      : huart_(huart), timeout_(timeout_ms) {}
+      : huart_(huart), timeout_(timeout_ms),
+        rx_producer_(rx_buf_.MakeProducer()), rx_consumer_(rx_buf_.MakeConsumer()),
+        tx_producer_(tx_buf_.MakeProducer()), tx_consumer_(tx_buf_.MakeConsumer()) {}
 
   // ---- ISR integration (Interrupt / Dma modes only) --------------------
 
@@ -114,7 +116,7 @@ class Stm32UartTransport
    */
   MYL_ISR_NOINLINE void RxCmpltCb() {
     if constexpr (Mode != TransferMode::Polling) {
-      rx_buf_.Put(rx_byte_);
+      rx_producer_.Put(rx_byte_);
       HAL_UART_Receive_IT(huart_, &rx_byte_, 1);
     }
   }
@@ -164,8 +166,7 @@ class Stm32UartTransport
     } else {
       // Push bytes to TX circular buffer, spinning if full
       for (size_t i = 0; i < size; ++i) {
-        while (!tx_buf_.Writable()) {}
-        tx_buf_.Put(data[i]);
+        while (!tx_producer_.TryPut(data[i])) {}
       }
       // Critical section: check + kick must be atomic w.r.t. TxCmpltCb ISR.
       // Without this, the ISR can drain the ring and clear tx_busy_ between
@@ -182,7 +183,7 @@ class Stm32UartTransport
     if constexpr (Mode == TransferMode::Polling) {
       return (__HAL_UART_GET_FLAG(huart_, UART_FLAG_RXNE) != 0U);
     } else {
-      return rx_buf_.Readable();
+      return rx_consumer_.Readable();
     }
   }
 
@@ -192,8 +193,9 @@ class Stm32UartTransport
       last_status_ = HAL_UART_Receive(huart_, &byte, 1, timeout_);
       return static_cast<char>(byte);
     } else {
-      while (!rx_buf_.Readable()) {}
-      return static_cast<char>(rx_buf_.Get());
+      uint8_t b;
+      while (!rx_consumer_.TryGet(b)) {}
+      return static_cast<char>(b);
     }
   }
 
@@ -208,12 +210,13 @@ class Stm32UartTransport
       return false;
     } else {
       const uint32_t start = HAL_GetTick();
-      while (!rx_buf_.Readable()) {
+      uint8_t b;
+      while (!rx_consumer_.TryGet(b)) {
         if ((HAL_GetTick() - start) >= static_cast<uint32_t>(timeout_ms)) {
           return false;
         }
       }
-      c = static_cast<char>(rx_buf_.Get());
+      c = static_cast<char>(b);
       return true;
     }
   }
@@ -224,8 +227,8 @@ class Stm32UartTransport
       return (last_status_ == HAL_OK) ? max_length : 0;
     } else {
       size_t count = 0;
-      while (count < max_length && rx_buf_.Readable()) {
-        data[count++] = rx_buf_.Get();
+      while (count < max_length && rx_consumer_.TryGet(data[count])) {
+        ++count;
       }
       return count;
     }
@@ -235,11 +238,11 @@ class Stm32UartTransport
   // ---- TX staging (Interrupt / Dma modes) ------------------------------
 
   MYL_ISR_NOINLINE void StartTx() {
-    if (tx_buf_.Readable()) {
+    if (tx_consumer_.Readable()) {
       tx_busy_ = true;
       tx_staging_len_ = 0;
-      while (tx_staging_len_ < TxBufSize && tx_buf_.Readable()) {
-        tx_staging_[tx_staging_len_++] = tx_buf_.Get();
+      while (tx_staging_len_ < TxBufSize && tx_consumer_.TryGet(tx_staging_[tx_staging_len_])) {
+        ++tx_staging_len_;
       }
       if constexpr (Mode == TransferMode::Dma) {
         last_status_ = HAL_UART_Transmit_DMA(huart_, tx_staging_,
@@ -262,9 +265,13 @@ class Stm32UartTransport
   // Interrupt / DMA mode RX (single-byte polling via IT)
   uint8_t rx_byte_{};
   CircularBuffer<uint8_t, RxBufSize> rx_buf_;
+  BufferProducer<uint8_t> rx_producer_;
+  BufferConsumer<uint8_t> rx_consumer_;
 
   // Interrupt / DMA mode TX (ring buffer → staging array → HAL transfer)
   CircularBuffer<uint8_t, TxBufSize> tx_buf_;
+  BufferProducer<uint8_t> tx_producer_;
+  BufferConsumer<uint8_t> tx_consumer_;
   uint8_t tx_staging_[TxBufSize]{};
   volatile size_t tx_staging_len_{};
   volatile bool tx_busy_{false};

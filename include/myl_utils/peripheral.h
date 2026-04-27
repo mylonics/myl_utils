@@ -251,6 +251,10 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
   volatile bool busy_{};
 
  public:
+  AsyncPacketSender()
+      : pkt_producer_(pkt_queue_.MakeProducer()),
+        pkt_consumer_(pkt_queue_.MakeConsumer()) {}
+
   /**
    * @brief Check whether an async transfer is currently in progress
    * @return true if the async engine is busy (transfer in-flight or queued)
@@ -289,9 +293,9 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
       }
     }
 
-    if (pkt_queue_.Readable()) {
-      DataPacket &temp_pkt_holder = *pkt_queue_.Get();
-      AsyncSendPacket(temp_pkt_holder);
+    DataPacket *next;
+    if (pkt_consumer_.TryGet(next)) {
+      AsyncSendPacket(*next);
     } else {
       busy_ = false;
     }
@@ -299,6 +303,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 
  private:
   CircularBuffer<DataPacket *, QueueSize> pkt_queue_;
+  BufferProducer<DataPacket *> pkt_producer_;
+  BufferConsumer<DataPacket *> pkt_consumer_;
   bool write_and_read_pkt_{};
   DataPacket *current_command_{nullptr};
 
@@ -306,9 +312,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
 
   MYL_NOINLINE bool QueuePacket(DataPacket &pkt) {
     if (busy_) {
-      if (!pkt_queue_.Writable()) return false;
-      pkt_queue_.Put(&pkt);
-      return true;
+      return pkt_producer_.TryPut(&pkt);
     } else {
       return AsyncSendPacket(pkt);
     }

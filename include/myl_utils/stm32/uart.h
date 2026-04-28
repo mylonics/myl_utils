@@ -118,7 +118,7 @@ class Stm32UartTransport
   MYL_ISR_NOINLINE void RxEventCb(uint16_t size) {
     if constexpr (Mode != TransferMode::Polling) {
       for (uint16_t i = 0; i < size; ++i) {
-        rx_producer_.TryPut(rx_staging_[i]);
+        rx_producer_.Put(rx_staging_[i]);
       }
       RearmRx();
     }
@@ -257,7 +257,7 @@ class Stm32UartTransport
       tx_busy_ = true;
       tx_staging_len_ = 0;
       while (tx_staging_len_ < TxBufSize && tx_consumer_.TryGet(tx_staging_[tx_staging_len_])) {
-        ++tx_staging_len_;
+        tx_staging_len_ = tx_staging_len_ + 1;
       }
       if constexpr (Mode == TransferMode::Dma) {
         last_status_ = HAL_UART_Transmit_DMA(huart_, tx_staging_,

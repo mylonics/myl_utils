@@ -67,6 +67,17 @@
 
 namespace myl_utils {
 
+namespace detail {
+// Non-template free function so the -Wvolatile pragma is evaluated at
+// definition time, not at template instantiation time (where it is ignored).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wvolatile"
+inline void DisableDmaHtIt(DMA_HandleTypeDef *hdma) {
+  __HAL_DMA_DISABLE_IT(hdma, DMA_IT_HT);
+}
+#pragma GCC diagnostic pop
+}  // namespace detail
+
 /**
  * @brief STM32 HAL UART/LPUART transport
  *
@@ -243,7 +254,7 @@ class Stm32UartTransport
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_UARTEx_ReceiveToIdle_DMA(huart_, rx_staging_, static_cast<uint16_t>(RxBufSize));
       if (huart_->hdmarx) {
-        __HAL_DMA_DISABLE_IT(huart_->hdmarx, DMA_IT_HT);
+        detail::DisableDmaHtIt(huart_->hdmarx);
       }
     } else {
       last_status_ = HAL_UARTEx_ReceiveToIdle_IT(huart_, rx_staging_, static_cast<uint16_t>(RxBufSize));

@@ -12,15 +12,17 @@
  * // From devicetree:
  * //   leds { compatible = "gpio-leds"; led0: led_0 { gpios = <&gpio0 13 GPIO_ACTIVE_LOW>; }; };
  * static const struct gpio_dt_spec led_spec = GPIO_DT_SPEC_GET(DT_NODELABEL(led0), gpios);
- * ZephyrGpioOutput led(led_spec, true);  // configure + set initial state to active
+ * ZephyrGpioOutput<> led(led_spec, true);       // normal polarity
+ * ZephyrGpioOutput<true> led_inv(led_spec, true); // inverted polarity
  *
  * led.Set(true);
  * led.Toggle();
  *
  * static const struct gpio_dt_spec btn_spec = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
- * ZephyrGpioInterrupt button(btn_spec);
+ * ZephyrGpioInterrupt<> button(btn_spec);
+ * ZephyrGpioInterrupt<true> button_inv(btn_spec); // Read() / edges are logically inverted
  * bool pressed = button.Read();
- * button.EnableInterrupt(ZephyrGpioInterrupt::Edge::Falling, my_handler);
+ * button.EnableInterrupt(ZephyrGpioInterrupt<>::Edge::Falling, my_handler);
  * @endcode
  */
 
@@ -33,9 +35,14 @@ namespace myl_utils {
  * @brief Zephyr GPIO output pin
  *
  * Wraps a gpio_dt_spec and configures the pin as an output on construction.
+ *
+ * @tparam Invert When true, logical Set(true) drives the pin inactive and
+ *                Set(false) drives it active. Resolved entirely at compile
+ *                time — zero runtime overhead.
  */
-class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput>,
-                         NonCopyable<ZephyrGpioOutput> {
+template <bool Invert = false>
+class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput<Invert>>,
+                         NonCopyable<ZephyrGpioOutput<Invert>> {
  protected:
   const struct gpio_dt_spec spec_;
 
@@ -48,11 +55,12 @@ class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput>,
    */
   ZephyrGpioOutput(const struct gpio_dt_spec &spec, bool initial_state = false)
       : spec_(spec) {
-    gpio_pin_configure_dt(&spec_, initial_state ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
+    const bool physical = Invert ? !initial_state : initial_state;
+    gpio_pin_configure_dt(&spec_, physical ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
   }
 
   MYL_NOINLINE void Set(bool state) {
-    gpio_pin_set_dt(&spec_, state);
+    gpio_pin_set_dt(&spec_, Invert ? !state : state);
   }
 
   MYL_NOINLINE void Toggle() {
@@ -64,9 +72,13 @@ class ZephyrGpioOutput : public GpioOutputBase<ZephyrGpioOutput>,
  * @brief Zephyr GPIO input pin
  *
  * Wraps a gpio_dt_spec and configures the pin as an input on construction.
+ *
+ * @tparam Invert When true, Read() returns the logical complement of the
+ *                physical pin level. Resolved at compile time.
  */
-class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput>,
-                        NonCopyable<ZephyrGpioInput> {
+template <bool Invert = false>
+class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput<Invert>>,
+                        NonCopyable<ZephyrGpioInput<Invert>> {
  protected:
   const struct gpio_dt_spec spec_;
 
@@ -82,7 +94,7 @@ class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput>,
   }
 
   MYL_NOINLINE bool Read() {
-    return gpio_pin_get_dt(&spec_) != 0;
+    return (gpio_pin_get_dt(&spec_) != 0) ^ Invert;
   }
 };
 
@@ -91,9 +103,13 @@ class ZephyrGpioInput : public GpioInputBase<ZephyrGpioInput>,
  *
  * Configured as output by default. Read() returns the current driven/sensed level.
  * Useful for open-drain pins or pins that need both read and write access.
+ *
+ * @tparam Invert When true, Set() and Read() operate on the logical complement
+ *                of the physical level. Resolved at compile time.
  */
-class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin>,
-                      NonCopyable<ZephyrGpioPin> {
+template <bool Invert = false>
+class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin<Invert>>,
+                      NonCopyable<ZephyrGpioPin<Invert>> {
  protected:
   const struct gpio_dt_spec spec_;
 
@@ -106,12 +122,13 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin>,
    */
   ZephyrGpioPin(const struct gpio_dt_spec &spec, bool initial_state = false)
       : spec_(spec) {
+    const bool physical = Invert ? !initial_state : initial_state;
     gpio_pin_configure_dt(&spec_,
-        (initial_state ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE) | GPIO_INPUT);
+        (physical ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE) | GPIO_INPUT);
   }
 
   MYL_NOINLINE void Set(bool state) {
-    gpio_pin_set_dt(&spec_, state);
+    gpio_pin_set_dt(&spec_, Invert ? !state : state);
   }
 
   MYL_NOINLINE void Toggle() {
@@ -119,7 +136,7 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin>,
   }
 
   MYL_NOINLINE bool Read() {
-    return gpio_pin_get_dt(&spec_) != 0;
+    return (gpio_pin_get_dt(&spec_) != 0) ^ Invert;
   }
 };
 
@@ -129,9 +146,14 @@ class ZephyrGpioPin : public GpioPinBase<ZephyrGpioPin>,
  * Configures the pin as an input and provides interrupt enable/disable.
  * The user-supplied callback is stored and invoked from the Zephyr GPIO
  * ISR via a static trampoline.
+ *
+ * @tparam Invert When true, Read() returns the logical complement and
+ *                Rising/Falling edges are swapped in EnableInterrupt().
+ *                Resolved at compile time.
  */
-class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt>,
-                            NonCopyable<ZephyrGpioInterrupt> {
+template <bool Invert = false>
+class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt<Invert>>,
+                            NonCopyable<ZephyrGpioInterrupt<Invert>> {
  protected:
   const struct gpio_dt_spec spec_;
   struct gpio_callback cb_data_{};
@@ -139,14 +161,14 @@ class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt>,
 
   /// Trampoline: Zephyr calls this; we recover the object and invoke the user callback
   static void IsrTrampoline(const struct device * /*dev*/, struct gpio_callback *cb, uint32_t /*pins*/) {
-    auto *self = CONTAINER_OF(cb, ZephyrGpioInterrupt, cb_data_);
+    auto *self = CONTAINER_OF(cb, ZephyrGpioInterrupt<Invert>, cb_data_);
     if (self->user_callback_) {
       self->user_callback_();
     }
   }
 
  public:
-  using Edge = GpioInterruptBase<ZephyrGpioInterrupt>::Edge;
+  using Edge = GpioInterruptBase<ZephyrGpioInterrupt<Invert>>::Edge;
 
   /**
    * @brief Construct and configure an interrupt-capable GPIO input
@@ -158,17 +180,19 @@ class ZephyrGpioInterrupt : public GpioInterruptBase<ZephyrGpioInterrupt>,
   }
 
   MYL_NOINLINE bool Read() {
-    return gpio_pin_get_dt(&spec_) != 0;
+    return (gpio_pin_get_dt(&spec_) != 0) ^ Invert;
   }
 
   MYL_NOINLINE bool EnableInterrupt(Edge edge, void (*callback)()) {
     user_callback_ = callback;
 
     gpio_flags_t zephyr_edge{};
+    // When Invert=true, Rising logical edge corresponds to a physical Falling
+    // edge and vice versa. The ternary is resolved at compile time.
     switch (edge) {
-      case Edge::Rising:  zephyr_edge = GPIO_INT_EDGE_TO_ACTIVE;   break;
-      case Edge::Falling: zephyr_edge = GPIO_INT_EDGE_TO_INACTIVE; break;
-      case Edge::Both:    zephyr_edge = GPIO_INT_EDGE_BOTH;        break;
+      case Edge::Rising:  zephyr_edge = Invert ? GPIO_INT_EDGE_TO_INACTIVE : GPIO_INT_EDGE_TO_ACTIVE;   break;
+      case Edge::Falling: zephyr_edge = Invert ? GPIO_INT_EDGE_TO_ACTIVE   : GPIO_INT_EDGE_TO_INACTIVE; break;
+      case Edge::Both:    zephyr_edge = GPIO_INT_EDGE_BOTH; break;
     }
 
     int ret = gpio_pin_interrupt_configure_dt(&spec_, zephyr_edge);

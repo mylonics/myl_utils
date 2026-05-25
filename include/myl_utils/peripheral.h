@@ -135,7 +135,8 @@ struct SpiPacket {
   ChipSelectPin chip_select{};   ///< Optional chip select GPIO (type-erased, no virtual)
   void (*callback)(Data &){};    ///< Optional completion callback
   // --- 32-bit fields --------------------------------------------------
-  uint32_t max_freq_hz{0};                  ///< 0 = use transport default; non-zero = cap SCLK for this transfer
+  uint32_t max_freq_hz{0};   ///< 0 = use transport default; non-zero = cap SCLK for this transfer
+  uint32_t timeout_ms{0};    ///< 0 = auto-compute from bus speed (STM32 only); non-zero = explicit override in ms
   // --- Byte-sized fields grouped together at the end ------------------
   PacketType type{PacketType::Write};
   SpiPolarity polarity{SpiPolarity::Low};   ///< Clock polarity (set by SpiDevice wrapper)
@@ -156,8 +157,7 @@ struct SpiPacket {
   }
 };
 
-// max_freq_hz fits in tail padding on 64-bit (6 pointers) but adds a word on 32-bit (7 pointers)
-static_assert(sizeof(SpiPacket) == (sizeof(void *) >= 8 ? 6 : 7) * sizeof(void *),
+static_assert(sizeof(SpiPacket) == (sizeof(void *) >= 8 ? 7 : 8) * sizeof(void *),
               "SpiPacket has unexpected padding — check for stray #pragma pack");
 
 /**
@@ -172,6 +172,8 @@ struct I2cPacket {
   Data *tx_data{};               ///< TX buffer (nullptr if unused)
   Data *rx_data{};               ///< RX buffer (nullptr if unused)
   void (*callback)(Data &){};    ///< Optional completion callback
+  // --- 32-bit fields --------------------------------------------------
+  uint32_t timeout_ms{0};        ///< 0 = auto-compute from bus speed (STM32 only); non-zero = explicit override in ms
   // --- Byte-sized fields grouped together at the end ------------------
   uint8_t addr{};                ///< I2C device address (set by I2cDevice wrapper)
   PacketType type{PacketType::Write};
@@ -189,7 +191,7 @@ struct I2cPacket {
   }
 };
 
-static_assert(sizeof(I2cPacket) == 4 * sizeof(void *),
+static_assert(sizeof(I2cPacket) == (sizeof(void *) >= 8 ? 4 : 5) * sizeof(void *),
               "I2cPacket has unexpected padding — check for stray #pragma pack");
 
 /**

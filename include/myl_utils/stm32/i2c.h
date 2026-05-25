@@ -112,6 +112,7 @@ class Stm32I2cTransport
  protected:
   I2C_HandleTypeDef *hi2c_;
   uint32_t timeout_;
+  uint32_t i2c_clock_hz_;
   HAL_StatusTypeDef last_status_{HAL_OK};
 
   /// Helper: convert 7-bit address to HAL 8-bit format
@@ -144,13 +145,13 @@ class Stm32I2cTransport
       }
       last_status_ = HAL_I2C_Mem_Read(
           hi2c_, addr, mem_addr, mem_size,
-          pkt.rx_data->data, pkt.rx_data->length, timeout_);
+          pkt.rx_data->data, pkt.rx_data->length, ComputeSyncTimeout(pkt));
     } else {
       last_status_ = HAL_I2C_Master_Transmit(
-          hi2c_, addr, pkt.tx_data->data, tx_len, timeout_);
+          hi2c_, addr, pkt.tx_data->data, tx_len, ComputeSyncTimeout(pkt));
       if (last_status_ == HAL_OK) {
         last_status_ = HAL_I2C_Master_Receive(
-            hi2c_, addr, pkt.rx_data->data, pkt.rx_data->length, timeout_);
+            hi2c_, addr, pkt.rx_data->data, pkt.rx_data->length, ComputeSyncTimeout(pkt));
       }
     }
     return last_status_ == HAL_OK;
@@ -159,14 +160,14 @@ class Stm32I2cTransport
   MYL_NOINLINE bool SyncWritePacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Transmit(
         hi2c_, HalAddr(pkt.addr),
-        pkt.tx_data->data, pkt.tx_data->length, timeout_);
+        pkt.tx_data->data, pkt.tx_data->length, ComputeSyncTimeout(pkt));
     return last_status_ == HAL_OK;
   }
 
   MYL_NOINLINE bool SyncReadPacket(I2cPacket &pkt) {
     last_status_ = HAL_I2C_Master_Receive(
         hi2c_, HalAddr(pkt.addr),
-        pkt.rx_data->data, pkt.rx_data->length, timeout_);
+        pkt.rx_data->data, pkt.rx_data->length, ComputeSyncTimeout(pkt));
     return last_status_ == HAL_OK;
   }
 
@@ -240,13 +241,39 @@ class Stm32I2cTransport
   /**
    * @brief Construct a new STM32 I2C Transport
    * @param hi2c Pointer to the HAL I2C handle (e.g. &hi2c1)
-   * @param timeout_ms Timeout in milliseconds for blocking (sync) transfers (default: 100)
+   * @param timeout_ms Fallback timeout in ms for sync transfers when i2c_clock_hz is 0 (default: 100)
+   * @param i2c_clock_hz I2C bus clock in Hz for auto-computed timeouts (e.g. 100000, 400000).
+   *                     0 = unknown; falls back to timeout_ms for all sync transfers.
+   *                     Use Init.ClockSpeed on F1/F4 or pass the known bus speed on G4/H7.
    */
-  explicit Stm32I2cTransport(I2C_HandleTypeDef *hi2c, uint32_t timeout_ms = 100)
-      : hi2c_(hi2c), timeout_(timeout_ms) {}
+  explicit Stm32I2cTransport(I2C_HandleTypeDef *hi2c, uint32_t timeout_ms = 100,
+                              uint32_t i2c_clock_hz = 0)
+      : hi2c_(hi2c), timeout_(timeout_ms), i2c_clock_hz_(i2c_clock_hz) {}
 
   /// Get the HAL status from the last transfer (sync or async)
   HAL_StatusTypeDef last_status() const { return last_status_; }
+
+ private:
+  /**
+   * @brief Compute a physically appropriate sync timeout for a given packet
+   *
+   * When i2c_clock_hz_ is provided, derives the timeout from the bus speed and
+   * transfer length with a 2x safety factor. Falls back to timeout_ otherwise.
+   *
+   * Priority: pkt.timeout_ms (explicit) > auto-computed > timeout_ (fallback)
+   */
+  uint32_t ComputeSyncTimeout(const I2cPacket &pkt) const {
+    if (pkt.timeout_ms > 0) return pkt.timeout_ms;
+    if (i2c_clock_hz_ > 0) {
+      uint16_t bytes = 0;
+      if (pkt.tx_data) bytes += pkt.tx_data->length;
+      if (pkt.rx_data) bytes += pkt.rx_data->length;
+      // 9 bits/byte (8 data + ACK), +2 for START/address/STOP overhead
+      // 2× safety factor × 1000 ms/s: (bytes+2) × 9 × 2 × 1000 / clock_hz + 1
+      return (static_cast<uint32_t>(bytes + 2u) * 18000u / i2c_clock_hz_) + 1u;
+    }
+    return timeout_;
+  }
 };
 
 /// @brief Convenience alias for DMA-mode I2C transport

@@ -74,6 +74,25 @@
  * bulk.rx.length = 256;
  * sensor.SendAsync(bulk.pkt);
  * @endcode
+ *
+ * Usage (auto-computed sync timeout):
+ * @code
+ * // Pass pclk_hz so SendSync() derives the timeout from the actual SCLK and
+ * // transfer length (2x safety factor) rather than a fixed constant.
+ * // SPI1 is on APB2; SPI2/SPI3 are on APB1 — use the matching HAL call.
+ * extern SPI_HandleTypeDef hspi1;
+ * Stm32SpiTransport<> spi(&hspi1, 100, HAL_RCC_GetPCLK2Freq());
+ *
+ * // timeout is now auto-computed per transfer — no magic numbers needed.
+ * sensor.SendSync(pkt);
+ *
+ * // Per-transfer override: force a longer timeout for a slow flash erase.
+ * SpiPacketBundle<4> cmd;
+ * cmd.tx.Set(ERASE_CMD);
+ * cmd.pkt = SpiPacket::WriteOnly(cmd.tx);
+ * cmd.pkt.timeout_ms = 5000;  // 5 s explicit override
+ * sensor.SendSync(cmd.pkt);
+ * @endcode
  */
 
 #include <myl_utils/peripheral.h>
@@ -152,19 +171,19 @@ class Stm32SpiTransport
   MYL_NOINLINE bool SyncReadWritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_TransmitReceive(
         hspi_, pkt.tx_data->data, pkt.rx_data->data,
-        pkt.tx_data->length, timeout_);
+        pkt.tx_data->length, ComputeSyncTimeout(pkt));
     return last_status_ == HAL_OK;
   }
 
   MYL_NOINLINE bool SyncWritePacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Transmit(
-        hspi_, pkt.tx_data->data, pkt.tx_data->length, timeout_);
+        hspi_, pkt.tx_data->data, pkt.tx_data->length, ComputeSyncTimeout(pkt));
     return last_status_ == HAL_OK;
   }
 
   MYL_NOINLINE bool SyncReadPacket(SpiPacket &pkt) {
     last_status_ = HAL_SPI_Receive(
-        hspi_, pkt.rx_data->data, pkt.rx_data->length, timeout_);
+        hspi_, pkt.rx_data->data, pkt.rx_data->length, ComputeSyncTimeout(pkt));
     return last_status_ == HAL_OK;
   }
 
@@ -221,6 +240,42 @@ class Stm32SpiTransport
   HAL_StatusTypeDef last_status() const { return last_status_; }
 
  private:
+  /// Map HAL BaudRatePrescaler register value to its integer divisor
+  static uint32_t PrescalerDivisor(uint32_t prescaler_reg) {
+    switch (prescaler_reg) {
+      case SPI_BAUDRATEPRESCALER_2:   return 2;
+      case SPI_BAUDRATEPRESCALER_4:   return 4;
+      case SPI_BAUDRATEPRESCALER_8:   return 8;
+      case SPI_BAUDRATEPRESCALER_16:  return 16;
+      case SPI_BAUDRATEPRESCALER_32:  return 32;
+      case SPI_BAUDRATEPRESCALER_64:  return 64;
+      case SPI_BAUDRATEPRESCALER_128: return 128;
+      default:                        return 256;
+    }
+  }
+
+  /**
+   * @brief Compute a physically appropriate sync timeout for a given packet
+   *
+   * When pclk_hz_ is provided, derives the timeout from the actual SCLK
+   * frequency and transfer length with a 2x safety factor. Falls back to
+   * the constructor-provided timeout_ when bus speed is unknown.
+   *
+   * Priority: pkt.timeout_ms (explicit) > auto-computed > timeout_ (fallback)
+   */
+  uint32_t ComputeSyncTimeout(const SpiPacket &pkt) const {
+    if (pkt.timeout_ms > 0) return pkt.timeout_ms;
+    if (pclk_hz_ > 0) {
+      uint32_t sclk_hz = pclk_hz_ / PrescalerDivisor(hspi_->Init.BaudRatePrescaler);
+      uint16_t bytes = 0;
+      if (pkt.tx_data) bytes = pkt.tx_data->length;
+      if (pkt.rx_data && pkt.rx_data->length > bytes) bytes = pkt.rx_data->length;
+      // (bytes × 8 bits × 2× safety × 1000 ms/s) / sclk_hz + 1 ms minimum
+      return (static_cast<uint32_t>(bytes) * 16000u / sclk_hz) + 1u;
+    }
+    return timeout_;
+  }
+
   /// Compute HAL-compatible BaudRatePrescaler value for a target max frequency
   uint32_t ComputeBaudRatePrescaler(uint32_t target_hz) const {
     const uint32_t prescalers[] = {

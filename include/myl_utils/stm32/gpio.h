@@ -21,13 +21,13 @@
  * #include <myl_utils/stm32/gpio.h>
  *
  * // Use the CubeMX-generated port/pin defines:
- * Stm32GpioOutput<> led(LED_GPIO_Port, LED_Pin);          // normal polarity
- * Stm32GpioOutput<true> led_inv(LED_GPIO_Port, LED_Pin);  // inverted polarity
+ * Stm32GpioOutput led(LED_GPIO_Port, LED_Pin);             // normal polarity
+ * Stm32GpioOutput led_inv(LED_GPIO_Port, LED_Pin, true);   // inverted polarity
  * led.Set(true);
  * led.Toggle();
  *
- * Stm32GpioInput<> button(BTN_GPIO_Port, BTN_Pin);
- * Stm32GpioInput<true> button_inv(BTN_GPIO_Port, BTN_Pin); // Read() logically inverted
+ * Stm32GpioInput button(BTN_GPIO_Port, BTN_Pin);
+ * Stm32GpioInput button_inv(BTN_GPIO_Port, BTN_Pin, true); // Read() logically inverted
  * bool pressed = button.Read();
  * @endcode
  */
@@ -42,16 +42,13 @@ namespace myl_utils {
 
 /**
  * @brief STM32 HAL GPIO output pin
- *
- * @tparam Invert When true, logical Set(true) drives the pin reset and
- *                Set(false) drives it set. Resolved entirely at compile time.
  */
-template <bool Invert = false>
-class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput<Invert>>,
-                        NonCopyable<Stm32GpioOutput<Invert>> {
+class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput>,
+                        NonCopyable<Stm32GpioOutput> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
+  bool invert_;
 
  public:
 
@@ -59,13 +56,14 @@ class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput<Invert>>,
    * @brief Construct a GPIO output wrapper
    * @param port GPIO port (e.g. GPIOA, LED_GPIO_Port)
    * @param pin GPIO pin mask (e.g. GPIO_PIN_5, LED_Pin)
+   * @param invert When true, Set(true) drives the pin low and Set(false) drives it high (default: false)
    * @note The pin must already be configured as an output via HAL_GPIO_Init / CubeMX.
    */
-  Stm32GpioOutput(GPIO_TypeDef *port, uint16_t pin)
-      : port_(port), pin_(pin) {}
+  Stm32GpioOutput(GPIO_TypeDef *port, uint16_t pin, bool invert = false)
+      : port_(port), pin_(pin), invert_(invert) {}
 
   MYL_NOINLINE void Set(bool state) {
-    HAL_GPIO_WritePin(port_, pin_, (Invert ? !state : state) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(port_, pin_, (invert_ ? !state : state) ? GPIO_PIN_SET : GPIO_PIN_RESET);
   }
 
   MYL_NOINLINE void Toggle() {
@@ -75,16 +73,13 @@ class Stm32GpioOutput : public GpioOutputBase<Stm32GpioOutput<Invert>>,
 
 /**
  * @brief STM32 HAL GPIO input pin
- *
- * @tparam Invert When true, Read() returns the logical complement of the
- *                physical pin level. Resolved at compile time.
  */
-template <bool Invert = false>
-class Stm32GpioInput : public GpioInputBase<Stm32GpioInput<Invert>>,
-                       NonCopyable<Stm32GpioInput<Invert>> {
+class Stm32GpioInput : public GpioInputBase<Stm32GpioInput>,
+                       NonCopyable<Stm32GpioInput> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
+  bool invert_;
 
  public:
 
@@ -92,13 +87,14 @@ class Stm32GpioInput : public GpioInputBase<Stm32GpioInput<Invert>>,
    * @brief Construct a GPIO input wrapper
    * @param port GPIO port (e.g. GPIOA, BTN_GPIO_Port)
    * @param pin GPIO pin mask (e.g. GPIO_PIN_0, BTN_Pin)
+   * @param invert When true, Read() returns the logical complement of the physical level (default: false)
    * @note The pin must already be configured as an input via HAL_GPIO_Init / CubeMX.
    */
-  Stm32GpioInput(GPIO_TypeDef *port, uint16_t pin)
-      : port_(port), pin_(pin) {}
+  Stm32GpioInput(GPIO_TypeDef *port, uint16_t pin, bool invert = false)
+      : port_(port), pin_(pin), invert_(invert) {}
 
   MYL_NOINLINE bool Read() {
-    return (HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET) ^ Invert;
+    return (HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET) ^ invert_;
   }
 };
 
@@ -107,16 +103,13 @@ class Stm32GpioInput : public GpioInputBase<Stm32GpioInput<Invert>>,
  *
  * Reads the current pin state via the input data register even when
  * configured as an output. Useful for open-drain pins.
- *
- * @tparam Invert When true, Set() and Read() operate on the logical complement
- *                of the physical level. Resolved at compile time.
  */
-template <bool Invert = false>
-class Stm32GpioPin : public GpioPinBase<Stm32GpioPin<Invert>>,
-                     NonCopyable<Stm32GpioPin<Invert>> {
+class Stm32GpioPin : public GpioPinBase<Stm32GpioPin>,
+                     NonCopyable<Stm32GpioPin> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
+  bool invert_;
 
  public:
 
@@ -124,13 +117,14 @@ class Stm32GpioPin : public GpioPinBase<Stm32GpioPin<Invert>>,
    * @brief Construct a bidirectional GPIO wrapper
    * @param port GPIO port (e.g. GPIOA)
    * @param pin GPIO pin mask (e.g. GPIO_PIN_5)
+   * @param invert When true, Set() and Read() operate on the logical complement of the physical level (default: false)
    * @note The pin must already be configured via HAL_GPIO_Init / CubeMX.
    */
-  Stm32GpioPin(GPIO_TypeDef *port, uint16_t pin)
-      : port_(port), pin_(pin) {}
+  Stm32GpioPin(GPIO_TypeDef *port, uint16_t pin, bool invert = false)
+      : port_(port), pin_(pin), invert_(invert) {}
 
   MYL_NOINLINE void Set(bool state) {
-    HAL_GPIO_WritePin(port_, pin_, (Invert ? !state : state) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(port_, pin_, (invert_ ? !state : state) ? GPIO_PIN_SET : GPIO_PIN_RESET);
   }
 
   MYL_NOINLINE void Toggle() {
@@ -138,7 +132,7 @@ class Stm32GpioPin : public GpioPinBase<Stm32GpioPin<Invert>>,
   }
 
   MYL_NOINLINE bool Read() {
-    return (HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET) ^ Invert;
+    return (HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET) ^ invert_;
   }
 };
 
@@ -153,19 +147,16 @@ class Stm32GpioPin : public GpioPinBase<Stm32GpioPin<Invert>>,
  *       static table indexed by pin number. Forward the HAL callback:
  * @code
  * void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
- *     Stm32GpioInterrupt<>::HandleIrq(GPIO_Pin);
+ *     Stm32GpioInterrupt::HandleIrq(GPIO_Pin);
  * }
  * @endcode
- *
- * @tparam Invert When true, Read() returns the logical complement of the
- *                physical pin level. Resolved at compile time.
  */
-template <bool Invert = false>
-class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt<Invert>>,
-                           NonCopyable<Stm32GpioInterrupt<Invert>> {
+class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt>,
+                           NonCopyable<Stm32GpioInterrupt> {
  protected:
   GPIO_TypeDef *port_;
   uint16_t pin_;
+  bool invert_;
 
   /// Callback table indexed by pin position (0–15)
   static inline void (*callbacks_[16])(){};
@@ -176,19 +167,20 @@ class Stm32GpioInterrupt : public GpioInterruptBase<Stm32GpioInterrupt<Invert>>,
   }
 
  public:
-  using Edge = GpioInterruptBase<Stm32GpioInterrupt<Invert>>::Edge;
+  using Edge = GpioInterruptBase<Stm32GpioInterrupt>::Edge;
 
   /**
    * @brief Construct an interrupt-capable GPIO input wrapper
    * @param port GPIO port (e.g. GPIOA)
    * @param pin GPIO pin mask (e.g. GPIO_PIN_0)
+   * @param invert When true, Read() returns the logical complement of the physical level (default: false)
    * @note The pin must already be configured for EXTI via HAL_GPIO_Init / CubeMX.
    */
-  Stm32GpioInterrupt(GPIO_TypeDef *port, uint16_t pin)
-      : port_(port), pin_(pin) {}
+  Stm32GpioInterrupt(GPIO_TypeDef *port, uint16_t pin, bool invert = false)
+      : port_(port), pin_(pin), invert_(invert) {}
 
   MYL_NOINLINE bool Read() {
-    return (HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET) ^ Invert;
+    return (HAL_GPIO_ReadPin(port_, pin_) == GPIO_PIN_SET) ^ invert_;
   }
 
   MYL_NOINLINE bool EnableInterrupt(Edge /*edge*/, void (*callback)()) {

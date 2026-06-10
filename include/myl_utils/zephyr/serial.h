@@ -102,6 +102,19 @@ class ZephyrUartBuffers : NonCopyable<ZephyrUartBuffers> {
     }
   }
 
+  bool DoTryPutC(char c) {
+    uint8_t b = static_cast<uint8_t>(c);
+    if (ring_buf_put(&tx_rb_, &b, 1) == 0) return false;
+    StartTxIfIdle();
+    return true;
+  }
+
+  size_t DoTryPutArray(const uint8_t *data, size_t size) {
+    uint32_t n = ring_buf_put(&tx_rb_, data, size);
+    if (n > 0) StartTxIfIdle();
+    return n;
+  }
+
   bool DoReadable() const { return ring_buf_size_get(&rx_rb_) > 0; }
 
   char DoGetC() {
@@ -226,6 +239,8 @@ class ZephyrUartTransport
 
   void   ImplPutC(char c)                           { DoPutC(c); }
   void   ImplPutArray(uint8_t *data, size_t size)   { DoPutArray(data, size); }
+  bool   ImplTryPutC(char c)                        { return DoTryPutC(c); }
+  size_t ImplTryPutArray(uint8_t *data, size_t size){ return DoTryPutArray(data, size); }
   bool   ImplReadable()                             { return DoReadable(); }
   char   ImplGetC()                                 { return DoGetC(); }
   bool   ImplGetCTimeout(char &c, size_t ms)        { return DoGetCTimeout(c, ms); }
@@ -300,6 +315,26 @@ class ZephyrAsyncUartTransport
     k_sem_take(&tx_done_sem_, K_FOREVER);
     uart_tx(dev_, data, size, SYS_FOREVER_US);
     // tx_done_sem_ is given back in UART_TX_DONE callback.
+  }
+
+  bool ImplTryPutC(char c) {
+    uint8_t b = static_cast<uint8_t>(c);
+    return ImplTryPutArray(&b, 1) == 1;
+  }
+
+  size_t ImplTryPutArray(uint8_t *data, size_t size) {
+    // If a TX is in progress, return 0 immediately.
+    if (k_sem_count_get(&tx_done_sem_) == 0) return 0;
+    // Grab the semaphore (non-blocking since we just checked) and start TX.
+    k_sem_take(&tx_done_sem_, K_NO_WAIT);
+    int ret = uart_tx(dev_, data, size, SYS_FOREVER_US);
+    if (ret != 0) {
+      // TX failed to start — release the semaphore so state stays consistent.
+      k_sem_give(&tx_done_sem_);
+      return 0;
+    }
+    // tx_done_sem_ is given back in UART_TX_DONE callback.
+    return size;
   }
 
   bool ImplReadable() { return ring_buf_size_get(&rx_rb_) > 0; }
@@ -436,6 +471,8 @@ class ZephyrUsbSerialDevice
 
   void   ImplPutC(char c)                           { DoPutC(c); }
   void   ImplPutArray(uint8_t *data, size_t size)   { DoPutArray(data, size); }
+  bool   ImplTryPutC(char c)                        { return DoTryPutC(c); }
+  size_t ImplTryPutArray(uint8_t *data, size_t size){ return DoTryPutArray(data, size); }
   bool   ImplReadable()                             { return DoReadable(); }
   char   ImplGetC()                                 { return DoGetC(); }
   bool   ImplGetCTimeout(char &c, size_t ms)        { return DoGetCTimeout(c, ms); }

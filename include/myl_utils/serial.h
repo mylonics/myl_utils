@@ -26,6 +26,8 @@
  *   void     ImplReconfigureUart(UartBaud, UartParity, UartStopBits)
  *   void     ImplPutC(char)
  *   void     ImplPutArray(uint8_t *, size_t)
+ *   bool     ImplTryPutC(char)                     // non-blocking, returns false if TX buffer full
+ *   size_t   ImplTryPutArray(uint8_t *, size_t)    // non-blocking, returns bytes actually written
  *   bool     ImplReadable()
  *   char     ImplGetC()
  *   bool     ImplGetCTimeout(char &, size_t timeout_ms)
@@ -95,6 +97,10 @@ enum class UartDataBits {
  * All public methods dispatch to Derived::Impl*() at compile time.
  * No vtable, no heap allocation, no runtime dispatch.
  *
+ * Blocking writes (PutC / PutArray) may spin indefinitely when the TX buffer
+ * is full. Use the non-blocking TryPutC / TryPutArray variants to write as
+ * much as fits and return immediately.
+ *
  * @tparam Derived Concrete transport class (Stm32UartTransport, ZephyrUartTransport, …)
  */
 template <class Derived>
@@ -108,11 +114,22 @@ class UartBase {
     derived().ImplReconfigureUart(baud, parity, stop_bits);
   }
 
-  /// Transmit a single character.
+  /// Transmit a single character (blocking — spins if TX buffer is full).
   MYL_NOINLINE void PutC(char c) { derived().ImplPutC(c); }
 
-  /// Transmit an array of bytes.
+  /// Transmit an array of bytes (blocking — spins if TX buffer is full).
   MYL_NOINLINE void PutArray(uint8_t *data, size_t size) { derived().ImplPutArray(data, size); }
+
+  /// Try to transmit a single character without blocking.
+  /// @return true if the character was accepted, false if the TX buffer is full.
+  MYL_NOINLINE bool TryPutC(char c) { return derived().ImplTryPutC(c); }
+
+  /// Try to transmit an array of bytes without blocking.
+  /// @return the number of bytes actually written (may be less than @p size
+  ///         if the TX buffer ran out of space; 0 means the buffer was full).
+  MYL_NOINLINE size_t TryPutArray(uint8_t *data, size_t size) {
+    return derived().ImplTryPutArray(data, size);
+  }
 
   /// Return true if at least one received byte is available.
   MYL_NOINLINE bool Readable() { return derived().ImplReadable(); }

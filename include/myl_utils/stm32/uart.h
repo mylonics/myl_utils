@@ -135,6 +135,17 @@ class Stm32UartTransport
     }
   }
 
+    /**
+   * @brief Call from HAL_UART_ErrorCallback() to recover the receiver after a UART error.
+   * Re-arms the RX transfer so the peripheral does not go permanently silent.
+   * No-op in polling mode.
+   */
+  MYL_ISR_NOINLINE void ErrorCb() {
+    if constexpr (Mode != TransferMode::Polling) {
+      RearmRx();
+    }
+  }
+
   HAL_StatusTypeDef LastStatus() const { return last_status_; }
 
  protected:
@@ -189,6 +200,34 @@ class Stm32UartTransport
       __disable_irq();
       if (!tx_busy_) StartTx();
       __set_PRIMASK(primask);
+    }
+  }
+
+  MYL_NOINLINE bool ImplTryPutC(char c) {
+    uint8_t b = static_cast<uint8_t>(c);
+    return ImplTryPutArray(&b, 1) == 1;
+  }
+
+  MYL_NOINLINE size_t ImplTryPutArray(uint8_t *data, size_t size) {
+    if constexpr (Mode == TransferMode::Polling) {
+      // In polling mode the HAL call is already bounded by timeout_, so
+      // treat it as "try" — return 0 only on error.
+      last_status_ = HAL_UART_Transmit(huart_, data, static_cast<uint16_t>(size), timeout_);
+      return (last_status_ == HAL_OK) ? size : 0;
+    } else {
+      // Push as many bytes as fit without spinning.
+      size_t written = 0;
+      while (written < size && tx_producer_.TryPut(data[written])) {
+        ++written;
+      }
+      if (written > 0) {
+        // Critical section: same atomicity requirement as ImplPutArray.
+        uint32_t primask = __get_PRIMASK();
+        __disable_irq();
+        if (!tx_busy_) StartTx();
+        __set_PRIMASK(primask);
+      }
+      return written;
     }
   }
 
@@ -276,6 +315,9 @@ class Stm32UartTransport
       } else {
         last_status_ = HAL_UART_Transmit_IT(huart_, tx_staging_,
                                              static_cast<uint16_t>(tx_staging_len_));
+      }
+      if (last_status_ != HAL_OK) {
+        tx_busy_ = false;
       }
     } else {
       tx_busy_ = false;

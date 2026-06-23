@@ -96,6 +96,7 @@
  */
 
 #include <myl_utils/peripheral.h>
+#include <myl_utils/stm32/timing.h>
 
 // Requires STM32 HAL to be included before this header.
 // Typically satisfied by including your project's "main.h" or the HAL
@@ -162,8 +163,12 @@ class Stm32SpiTransport
       }
 
       if (need_reinit) HAL_SPI_Init(hspi_);
+      pkt.chip_select.Set(true);
+      if (pkt.cs_setup_us) Stm32Timing::DelayUs(pkt.cs_setup_us);
+    } else {
+      if (pkt.cs_hold_us) Stm32Timing::DelayUs(pkt.cs_hold_us);
+      pkt.chip_select.Set(false);
     }
-    pkt.chip_select.Set(enable);
   }
 
   // ---- Synchronous (blocking) implementations ---------------------------

@@ -113,8 +113,12 @@ class ZephyrSpiTransport : public SyncSpi<ZephyrSpiTransport> {
         target_freq = pkt.max_freq_hz;
       }
       config_.frequency = target_freq;
+      pkt.chip_select.Set(true);
+      if (pkt.cs_setup_us) k_busy_wait(pkt.cs_setup_us);
+    } else {
+      if (pkt.cs_hold_us) k_busy_wait(pkt.cs_hold_us);
+      pkt.chip_select.Set(false);
     }
-    pkt.chip_select.Set(enable);
   }
 
  public:
@@ -191,8 +195,12 @@ class ZephyrAsyncSpiTransport
         target_freq = pkt.max_freq_hz;
       }
       config_.frequency = target_freq;
+      pkt.chip_select.Set(true);
+      if (pkt.cs_setup_us) k_busy_wait(pkt.cs_setup_us);
+    } else {
+      if (pkt.cs_hold_us) k_busy_wait(pkt.cs_hold_us);
+      pkt.chip_select.Set(false);
     }
-    pkt.chip_select.Set(enable);
   }
 
   // ---- Synchronous (blocking) implementations ---------------------------

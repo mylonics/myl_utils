@@ -206,8 +206,8 @@ class Stm32SpiTransport
           hspi_, pkt.tx_data->data, pkt.rx_data->data,
           pkt.tx_data->length);
       if (last_status_ == HAL_OK) {
-        hspi_->hdmatx->Instance->CR &= ~DMA_IT_HT;
-        hspi_->hdmarx->Instance->CR &= ~DMA_IT_HT;
+        static_cast<DMA_Stream_TypeDef *>(hspi_->hdmatx->Instance)->CR &= ~DMA_IT_HT;
+        static_cast<DMA_Stream_TypeDef *>(hspi_->hdmarx->Instance)->CR &= ~DMA_IT_HT;
       }
     } else {
       last_status_ = HAL_SPI_TransmitReceive_IT(
@@ -222,7 +222,7 @@ class Stm32SpiTransport
       last_status_ = HAL_SPI_Transmit_DMA(
           hspi_, pkt.tx_data->data, pkt.tx_data->length);
       if (last_status_ == HAL_OK) {
-        hspi_->hdmatx->Instance->CR &= ~DMA_IT_HT;
+        static_cast<DMA_Stream_TypeDef *>(hspi_->hdmatx->Instance)->CR &= ~DMA_IT_HT;
       }
     } else {
       last_status_ = HAL_SPI_Transmit_IT(
@@ -236,7 +236,7 @@ class Stm32SpiTransport
       last_status_ = HAL_SPI_Receive_DMA(
           hspi_, pkt.rx_data->data, pkt.rx_data->length);
       if (last_status_ == HAL_OK) {
-        hspi_->hdmarx->Instance->CR &= ~DMA_IT_HT;
+        static_cast<DMA_Stream_TypeDef *>(hspi_->hdmarx->Instance)->CR &= ~DMA_IT_HT;
       }
     } else {
       last_status_ = HAL_SPI_Receive_IT(

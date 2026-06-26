@@ -171,6 +171,12 @@ class Stm32SpiTransport
     }
   }
 
+  /// Fast chip-select: toggles CS pin only — no reconfiguration, no delays.
+  /// Precondition: SPI mode and frequency are already configured (StampPacket + one SendSync at init).
+  MYL_NOINLINE void ChipSelectFast(SpiPacket &pkt, bool enable) {
+    pkt.chip_select.Set(enable);
+  }
+
   // ---- Synchronous (blocking) implementations ---------------------------
 
   MYL_NOINLINE bool SyncReadWritePacket(SpiPacket &pkt) {
@@ -199,6 +205,10 @@ class Stm32SpiTransport
       last_status_ = HAL_SPI_TransmitReceive_DMA(
           hspi_, pkt.tx_data->data, pkt.rx_data->data,
           pkt.tx_data->length);
+      if (last_status_ == HAL_OK) {
+        __HAL_DMA_DISABLE_IT(hspi_->hdmatx, DMA_IT_HT);
+        __HAL_DMA_DISABLE_IT(hspi_->hdmarx, DMA_IT_HT);
+      }
     } else {
       last_status_ = HAL_SPI_TransmitReceive_IT(
           hspi_, pkt.tx_data->data, pkt.rx_data->data,
@@ -211,6 +221,9 @@ class Stm32SpiTransport
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_SPI_Transmit_DMA(
           hspi_, pkt.tx_data->data, pkt.tx_data->length);
+      if (last_status_ == HAL_OK) {
+        __HAL_DMA_DISABLE_IT(hspi_->hdmatx, DMA_IT_HT);
+      }
     } else {
       last_status_ = HAL_SPI_Transmit_IT(
           hspi_, pkt.tx_data->data, pkt.tx_data->length);
@@ -222,6 +235,9 @@ class Stm32SpiTransport
     if constexpr (Mode == TransferMode::Dma) {
       last_status_ = HAL_SPI_Receive_DMA(
           hspi_, pkt.rx_data->data, pkt.rx_data->length);
+      if (last_status_ == HAL_OK) {
+        __HAL_DMA_DISABLE_IT(hspi_->hdmarx, DMA_IT_HT);
+      }
     } else {
       last_status_ = HAL_SPI_Receive_IT(
           hspi_, pkt.rx_data->data, pkt.rx_data->length);

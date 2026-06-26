@@ -81,6 +81,10 @@ class ZephyrI2cTransport : public SyncI2c<ZephyrI2cTransport> {
     // I2C does not use chip select - addressing is handled via the packet address
   }
 
+  MYL_NOINLINE void ChipSelectFast(I2cPacket & /*pkt*/, bool /*enable*/) {
+    // I2C has no chip select
+  }
+
  public:
   explicit ZephyrI2cTransport(const struct device *i2c_dev) : dev_(i2c_dev) {}
 

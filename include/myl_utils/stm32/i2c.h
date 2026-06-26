@@ -124,6 +124,10 @@ class Stm32I2cTransport
     // I2C does not use chip select — addressing is handled via the packet address
   }
 
+  MYL_NOINLINE void ChipSelectFast(I2cPacket & /*pkt*/, bool /*enable*/) {
+    // I2C has no chip select
+  }
+
   // ---- Synchronous (blocking) implementations ---------------------------
 
   /**

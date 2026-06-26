@@ -143,6 +143,7 @@ struct SpiPacket {
   PacketType type{PacketType::Write};
   SpiPolarity polarity{SpiPolarity::Low};   ///< Clock polarity (set by SpiDevice wrapper)
   SpiPhase phase{SpiPhase::Leading};        ///< Clock phase (set by SpiDevice wrapper)
+  bool fast{false};  ///< Set by SendAsyncFast; tells TxRxCmpltCb to use ChipSelectFast for deassert
 
   /// Factory methods for creating typed packets (avoids fragile aggregate initialization)
   static SpiPacket WriteOnly(Data &tx) {
@@ -179,6 +180,7 @@ struct I2cPacket {
   // --- Byte-sized fields grouped together at the end ------------------
   uint8_t addr{};                ///< I2C device address (set by I2cDevice wrapper)
   PacketType type{PacketType::Write};
+  bool fast{false};  ///< Set by SendAsyncFast; tells TxRxCmpltCb to use ChipSelectFast for deassert
 
   /// Factory methods for creating typed packets (avoids fragile aggregate initialization)
   /// @note No FullDuplex — I2C is half-duplex; use RegRead for register read patterns
@@ -289,7 +291,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
       // Read failed to start — fall through to cleanup
     }
 
-    derived().ChipSelect(*current_command_, false);
+    if (current_command_->fast) derived().ChipSelectFast(*current_command_, false);
+    else                        derived().ChipSelect(*current_command_, false);
     if (current_command_->callback) {
       if (current_command_->rx_data) {
         current_command_->callback(*current_command_->rx_data);
@@ -327,7 +330,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
     busy_ = true;
     write_and_read_pkt_ = false;
     current_command_ = &pkt;
-    derived().ChipSelect(pkt, true);
+    if (pkt.fast) derived().ChipSelectFast(pkt, true);
+    else          derived().ChipSelect(pkt, true);
     bool ok = false;
     switch (pkt.type) {
       case PacketType::Read:
@@ -346,7 +350,8 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
         break;
     }
     if (!ok) {
-      derived().ChipSelect(pkt, false);
+      if (pkt.fast) derived().ChipSelectFast(pkt, false);
+      else          derived().ChipSelect(pkt, false);
       busy_ = false;
     }
     return ok;
@@ -364,6 +369,7 @@ class AsyncPacketSender : NonCopyable<AsyncPacketSender<Derived, DataPacket, Que
  *   bool SyncWritePacket(DataPacket &pkt)
  *   bool SyncReadPacket(DataPacket &pkt)
  *   void ChipSelect(DataPacket &pkt, bool enable)
+ *   void ChipSelectFast(DataPacket &pkt, bool enable)  — CS pin toggle only, no reconfiguration
  *
  * @tparam Derived The concrete implementation class (CRTP parameter)
  * @tparam DataPacket Either SpiPacket or I2cPacket
@@ -378,6 +384,12 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
    */
   [[nodiscard]] MYL_NOINLINE bool SendSync(DataPacket &pkt) {
     return SyncSendPacket(pkt);
+  }
+
+  /// Fast-path blocking transfer — skips StampPacket and ChipSelect reconfiguration/delays.
+  /// Pre-stamp the packet with StampPacket at init and set pkt.timeout_ms > 0.
+  [[nodiscard]] MYL_NOINLINE bool SendFast(DataPacket &pkt) {
+    return SyncSendPacketFast(pkt);
   }
 
  private:
@@ -414,6 +426,32 @@ class SyncPacketSender : NonCopyable<SyncPacketSender<Derived, DataPacket>> {
         break;
     }
     derived().ChipSelect(pkt, false);
+    return ok;
+  }
+
+  MYL_NOINLINE bool SyncSendPacketFast(DataPacket &pkt) {
+    if constexpr (HasAsyncBusy<Derived>::value) {
+      if (derived().IsAsyncBusy()) return false;
+    }
+    bool ok = true;
+    derived().ChipSelectFast(pkt, true);
+    switch (pkt.type) {
+      case PacketType::Read:
+        ok = derived().SyncReadPacket(pkt);
+        break;
+      case PacketType::WriteAndRead:
+        ok = derived().SyncReadWritePacket(pkt);
+        break;
+      case PacketType::WriteThenRead:
+        ok = derived().SyncWritePacket(pkt);
+        if (ok) ok = derived().SyncReadPacket(pkt);
+        break;
+      case PacketType::Write:
+      default:
+        ok = derived().SyncWritePacket(pkt);
+        break;
+    }
+    derived().ChipSelectFast(pkt, false);
     return ok;
   }
 };
@@ -471,6 +509,10 @@ class SpiDevice {
   uint16_t cs_setup_us_{0};
   uint16_t cs_hold_us_{0};
 
+ public:
+  /// Stamp per-device fields into a packet. Call once at init; then use SendFast/SendAsyncFast
+  /// in the hot loop to skip per-call stamping overhead. Also set pkt.timeout_ms > 0 to skip
+  /// timeout auto-computation.
   MYL_NOINLINE void StampPacket(SpiPacket &pkt) {
     pkt.chip_select = chip_select_;
     pkt.polarity = polarity_;
@@ -481,7 +523,6 @@ class SpiDevice {
     if (pkt.cs_hold_us == 0) pkt.cs_hold_us = cs_hold_us_;
   }
 
- public:
   /// Construct without chip select
   explicit SpiDevice(Transport &transport, void (*cb)(Data &) = nullptr,
                      SpiPolarity pol = SpiPolarity::Low, SpiPhase pha = SpiPhase::Leading,
@@ -516,6 +557,20 @@ class SpiDevice {
   /// Queue an async transfer (requires transport with AsyncSpi base). Packet must outlive the transfer.
   [[nodiscard]] MYL_NOINLINE bool SendAsync(SpiPacket &pkt) {
     StampPacket(pkt);
+    return transport_.SendAsync(pkt);
+  }
+
+  /// Fast-path blocking transfer — skips StampPacket and ChipSelect reconfiguration/delays.
+  /// Call StampPacket and set pkt.timeout_ms > 0 once at init before the hot loop.
+  /// Safe only when peripheral mode/freq will not change between calls.
+  [[nodiscard]] MYL_NOINLINE bool SendFast(SpiPacket &pkt) {
+    return transport_.SendFast(pkt);
+  }
+
+  /// Fast-path async transfer — skips StampPacket. Sets pkt.fast so TxRxCmpltCb uses
+  /// ChipSelectFast for the deferred CS deassert. Packet must outlive the transfer.
+  [[nodiscard]] MYL_NOINLINE bool SendAsyncFast(SpiPacket &pkt) {
+    pkt.fast = true;
     return transport_.SendAsync(pkt);
   }
 
@@ -556,14 +611,16 @@ class I2cDevice {
   uint8_t addr_{};
   void (*callback_)(Data &){};
 
+ public:
+  I2cDevice(Transport &transport, uint8_t addr, void (*cb)(Data &) = nullptr)
+      : transport_(transport), addr_(addr), callback_(cb) {}
+
+  /// Stamp per-device fields into a packet. Call once at init; then use SendFast/SendAsyncFast
+  /// in the hot loop to skip per-call stamping overhead.
   MYL_NOINLINE void StampPacket(I2cPacket &pkt) {
     pkt.addr = addr_;
     if (!pkt.callback) pkt.callback = callback_;
   }
-
- public:
-  I2cDevice(Transport &transport, uint8_t addr, void (*cb)(Data &) = nullptr)
-      : transport_(transport), addr_(addr), callback_(cb) {}
 
   /// Execute a blocking transfer (requires transport with SyncI2c base)
   [[nodiscard]] MYL_NOINLINE bool SendSync(I2cPacket &pkt) {
@@ -574,6 +631,18 @@ class I2cDevice {
   /// Queue an async transfer (requires transport with AsyncI2c base). Packet must outlive the transfer.
   [[nodiscard]] MYL_NOINLINE bool SendAsync(I2cPacket &pkt) {
     StampPacket(pkt);
+    return transport_.SendAsync(pkt);
+  }
+
+  /// Fast-path blocking transfer — skips StampPacket. Call StampPacket once at init.
+  [[nodiscard]] MYL_NOINLINE bool SendFast(I2cPacket &pkt) {
+    return transport_.SendFast(pkt);
+  }
+
+  /// Fast-path async transfer — skips StampPacket. Sets pkt.fast so TxRxCmpltCb uses
+  /// ChipSelectFast for the deferred CS deassert. Packet must outlive the transfer.
+  [[nodiscard]] MYL_NOINLINE bool SendAsyncFast(I2cPacket &pkt) {
+    pkt.fast = true;
     return transport_.SendAsync(pkt);
   }
 

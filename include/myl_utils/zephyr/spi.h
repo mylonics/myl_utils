@@ -121,6 +121,12 @@ class ZephyrSpiTransport : public SyncSpi<ZephyrSpiTransport> {
     }
   }
 
+  /// Fast chip-select: toggles CS pin only — no reconfiguration, no delays.
+  /// Precondition: config_.operation and config_.frequency are already set (one SendSync at init).
+  MYL_NOINLINE void ChipSelectFast(SpiPacket &pkt, bool enable) {
+    pkt.chip_select.Set(enable);
+  }
+
  public:
   ZephyrSpiTransport(const struct device *spi_dev, const struct spi_config *spi_config)
       : dev_(spi_dev), config_(*spi_config), default_freq_(spi_config->frequency) {}
@@ -201,6 +207,12 @@ class ZephyrAsyncSpiTransport
       if (pkt.cs_hold_us) k_busy_wait(pkt.cs_hold_us);
       pkt.chip_select.Set(false);
     }
+  }
+
+  /// Fast chip-select: toggles CS pin only — no reconfiguration, no delays.
+  /// Precondition: config_.operation and config_.frequency are already set (one SendSync at init).
+  MYL_NOINLINE void ChipSelectFast(SpiPacket &pkt, bool enable) {
+    pkt.chip_select.Set(enable);
   }
 
   // ---- Synchronous (blocking) implementations ---------------------------

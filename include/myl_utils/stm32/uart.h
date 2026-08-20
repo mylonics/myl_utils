@@ -65,6 +65,8 @@
 #include <myl_utils/serial.h>      // UartBase<Derived>, enums
 #include <myl_utils/noncopyable.h>
 
+#include <limits>
+
 namespace myl_utils {
 
 namespace detail {
@@ -128,14 +130,39 @@ class Stm32UartTransport
    */
   MYL_ISR_NOINLINE void RxEventCb(uint16_t size) {
     if constexpr (Mode != TransferMode::Polling) {
-      for (uint16_t i = 0; i < size; ++i) {
-        rx_producer_.Put(rx_staging_[i]);
+      const size_t received = (size <= RxBufSize) ? size : RxBufSize;
+      // TryPutN, not Put: Put() overwrites the oldest byte by advancing the
+      // read index from this ISR. The consumer may be between its read-index
+      // load and store, allowing that store to re-deliver stale bytes.
+      const size_t written = rx_producer_.TryPutN(rx_staging_, received);
+      if (written < received) {
+        const size_t dropped = received - written;
+        rx_overflow_bytes_.store_relaxed(rx_overflow_bytes_.load_relaxed() + dropped);
       }
       RearmRx();
     }
   }
 
-    /**
+  /// Bytes discarded because the RX ring was full. Cumulative modulo 2^32.
+  uint32_t RxOverflowBytes() const {
+    return static_cast<uint32_t>(rx_overflow_bytes_.load_relaxed());
+  }
+
+  /**
+   * @brief Return the current TX ring free space in bytes.
+   *
+   * In polling mode there is no TX ring; the maximum size_t value represents
+   * effectively unlimited space. In interrupt/DMA modes this is a snapshot.
+   */
+  size_t TxFreeSpace() const {
+    if constexpr (Mode == TransferMode::Polling) {
+      return std::numeric_limits<size_t>::max();
+    } else {
+      return tx_producer_.FreeSpace();
+    }
+  }
+
+  /**
    * @brief Call from HAL_UART_ErrorCallback() to recover the receiver after a UART error.
    * Re-arms the RX transfer so the peripheral does not go permanently silent.
    * No-op in polling mode.
@@ -335,6 +362,7 @@ class Stm32UartTransport
   CircularBuffer<uint8_t, RxBufSize> rx_buf_;
   BufferProducer<uint8_t> rx_producer_;
   BufferConsumer<uint8_t> rx_consumer_;
+  detail::AtomicIndex rx_overflow_bytes_;
 
   // Interrupt / DMA mode TX (ring buffer → staging array → HAL transfer)
   CircularBuffer<uint8_t, TxBufSize> tx_buf_;
